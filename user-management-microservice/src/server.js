@@ -1,71 +1,137 @@
-
-
-// Patches
-const {inject, errorHandler} = require('express-custom-error');
-inject(); // Patch express in order to use async / await syntax
-
-// Require Dependencies
-
 const express = require('express');
-const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
+const { sequelize } = require('./models');
+const apiRoutes = require('./routes'); // Main router
+const { errorHandler } = require('./middleware/errorHandler');
+const swaggerSetup = require('./config/swagger');
 
-const logger = require('./util/logger');
-
-// Load .env Enviroment Variables to process.env
-
-require('mandatoryenv').load([
-    'DB_HOST',
-    'DB_DATABASE',
-    'DB_USER',
-    'DB_PASSWORD',
-    'PORT',
-    'SECRET'
-]);
-
-const { PORT } = process.env;
-
-
-// Instantiate an Express Application
 const app = express();
 
-
-// Configure Express App Instance
-app.use(express.json( { limit: '50mb' } ));
-app.use(express.urlencoded( { extended: true, limit: '10mb' } ));
-
-// Configure custom logger middleware
-app.use(logger.dev, logger.combined);
-
-app.use(cookieParser());
-app.use(cors());
+// Security Middleware
 app.use(helmet());
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+  credentials: true
+}));
 
-// This middleware adds the json header to every response
-app.use('*', (req, res, next) => {
-    res.setHeader('Content-Type', 'application/json');
-    next();
-})
+// Global Rate Limiting
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  message: {
+    success: false,
+    error: 'Too many requests',
+    message: 'Rate limit exceeded. Please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(globalLimiter);
 
-// Assign Routes
+// Body Parser
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-app.use('/', require('./routes/router.js'));
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - IP: ${req.ip}`);
+  next();
+});
 
+// Swagger Documentation
+swaggerSetup(app);
 
-// Handle errors
-app.use(errorHandler());
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'User Management Service API',
+    version: '1.0.0',
+    documentation: '/api-docs',
+    health: '/api/health',
+    endpoints: {
+      authentication: '/api/auth',
+      users: '/api/users'
+    }
+  });
+});
 
-// Handle not valid route
+// Mount API routes
+app.use('/api', apiRoutes);
+
+// Error Handler
+app.use(errorHandler);
+
+// Global 404 Handler
 app.use('*', (req, res) => {
-    res
-    .status(404)
-    .json( {status: false, message: 'Endpoint Not Found'} );
-})
+  res.status(404).json({
+    success: false,
+    error: 'Not Found',
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+    suggestion: 'Check the API documentation at /api-docs'
+  });
+});
 
-// Open Server on selected Port
-app.listen(
-    PORT,
-    () => console.info('Server listening on port ', PORT)
-);
+const PORT = process.env.PORT || 3001;
+
+// Graceful shutdown handling
+const gracefulShutdown = (signal) => {
+  console.log(`\n${signal} received. Starting graceful shutdown...`);
+  
+  server.close(() => {
+    console.log('HTTP server closed.');
+    
+    sequelize.close().then(() => {
+      console.log('Database connection closed.');
+      process.exit(0);
+    }).catch((err) => {
+      console.error('Error during database shutdown:', err);
+      process.exit(1);
+    });
+  });
+};
+
+// Start Server
+const startServer = async () => {
+  try {
+    // Test database connection
+    await sequelize.authenticate();
+    console.log('✅ Database connection established successfully.');
+
+    // Sync database models
+    await sequelize.sync({ 
+      alter: process.env.NODE_ENV === 'development',
+      force: process.env.DB_FORCE_SYNC === 'true' 
+    });
+    console.log('✅ Database models synchronized.');
+
+    const server = app.listen(PORT, () => {
+      console.log(`🚀 User Management Service running on port ${PORT}`);
+      console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+      console.log(`🏥 Health Check: http://localhost:${PORT}/api/health`);
+      console.log(`📊 Service Info: http://localhost:${PORT}/api/info`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+
+    // Handle shutdown signals
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+    return server;
+  } catch (error) {
+    console.error('❌ Unable to start server:', error);
+    process.exit(1);
+  }
+};
+
+// Only start server if this file is run directly
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = app;
