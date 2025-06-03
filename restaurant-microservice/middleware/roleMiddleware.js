@@ -29,52 +29,29 @@ const roleMiddleware = (allowedRoles) => {
 };
 
 /**
- * Admin role middleware - shorthand for admin roles
- */
-const adminMiddleware = roleMiddleware(["sales_dept", "tech_support"]);
-
-/**
- * Driver role middleware - shorthand for delivery drivers
- */
-const driverMiddleware = roleMiddleware(["delivery_driver"]);
-
-/**
- * Restaurant owner middleware
+ * Restaurant owner middleware - ensures only restaurant owners can access
  */
 const restaurantOwnerMiddleware = roleMiddleware(["restaurant_owner"]);
 
 /**
- * Self or admin middleware - allows access to own resources or admin access
+ * Admin middleware - for sales and tech support staff
  */
-const selfOrAdminMiddleware = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required",
-      message: "Please login to access this resource",
-    });
-  }
+const adminMiddleware = roleMiddleware(["sales_dept", "tech_support"]);
 
-  const targetUuid = req.params.uuid || req.params.userId;
-  const isAdmin = ["sales_dept", "tech_support"].includes(req.user.userType);
-  const isSelf = req.user.uuid === targetUuid;
+/**
+ * Developer middleware - for third-party developers
+ */
+const developerMiddleware = roleMiddleware(["developer"]);
 
-  if (!isAdmin && !isSelf) {
-    return res.status(403).json({
-      success: false,
-      error: "Access denied",
-      message:
-        "You can only access your own resources or contact an administrator",
-    });
-  }
-
-  next();
-};
+/**
+ * Staff middleware - for internal staff (sales and tech support)
+ */
+const staffMiddleware = roleMiddleware(["sales_dept", "tech_support"]);
 
 module.exports = {
   roleMiddleware,
-  adminMiddleware,
-  driverMiddleware,
   restaurantOwnerMiddleware,
-  selfOrAdminMiddleware,
+  adminMiddleware,
+  developerMiddleware,
+  staffMiddleware,
 };

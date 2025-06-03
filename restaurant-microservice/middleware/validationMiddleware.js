@@ -62,8 +62,20 @@ const validatePagination = validateMiddleware(
   Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
-    sort: Joi.string().valid("asc", "desc").default("desc"),
     sortBy: Joi.string().default("createdAt"),
+    sortOrder: Joi.string().valid("ASC", "DESC").default("DESC"),
+  }),
+  "query"
+);
+
+/**
+ * Validate search parameters
+ */
+const validateSearch = validateMiddleware(
+  Joi.object({
+    q: Joi.string().min(2).max(100).optional(),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(50).default(20),
   }),
   "query"
 );
@@ -72,4 +84,5 @@ module.exports = {
   validateMiddleware,
   validateUuidParam,
   validatePagination,
+  validateSearch,
 };

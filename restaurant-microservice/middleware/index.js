@@ -1,16 +1,17 @@
 const { authMiddleware, optionalAuthMiddleware } = require("./authMiddleware");
 const {
   roleMiddleware,
-  adminMiddleware,
-  driverMiddleware,
   restaurantOwnerMiddleware,
-  selfOrAdminMiddleware,
+  adminMiddleware,
+  developerMiddleware,
+  staffMiddleware,
 } = require("./roleMiddleware");
 const { rateLimitMiddleware } = require("./rateLimitMiddleware");
 const {
   validateMiddleware,
   validateUuidParam,
   validatePagination,
+  validateSearch,
 } = require("./validationMiddleware");
 const { uploadMiddleware, handleUploadError } = require("./uploadMiddleware");
 const {
@@ -18,10 +19,7 @@ const {
   notFoundHandler,
   asyncHandler,
 } = require("./errorHandler");
-const {
-  loggingMiddleware,
-  securityLoggingMiddleware,
-} = require("./loggingMiddleware");
+const corsMiddleware = require("./corsMiddleware");
 
 module.exports = {
   // Authentication
@@ -30,10 +28,10 @@ module.exports = {
 
   // Authorization
   roleMiddleware,
-  adminMiddleware,
-  driverMiddleware,
   restaurantOwnerMiddleware,
-  selfOrAdminMiddleware,
+  adminMiddleware,
+  developerMiddleware,
+  staffMiddleware,
 
   // Rate Limiting
   rateLimitMiddleware,
@@ -42,6 +40,7 @@ module.exports = {
   validateMiddleware,
   validateUuidParam,
   validatePagination,
+  validateSearch,
 
   // File Upload
   uploadMiddleware,
@@ -52,7 +51,6 @@ module.exports = {
   notFoundHandler,
   asyncHandler,
 
-  // Logging
-  loggingMiddleware,
-  securityLoggingMiddleware,
+  // CORS
+  corsMiddleware,
 };

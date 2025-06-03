@@ -14,7 +14,16 @@ const sequelize = new Sequelize(
 const db = {};
 
 // Import Models
-db.User = require("./User")(sequelize, Sequelize.DataTypes);
+db.Restaurant = require("./Restaurant")(sequelize, Sequelize.DataTypes);
+db.Category = require("./Category")(sequelize, Sequelize.DataTypes);
+db.Item = require("./Item")(sequelize, Sequelize.DataTypes);
+db.Menu = require("./Menu")(sequelize, Sequelize.DataTypes);
+db.MenuItems = require("./MenuItems")(sequelize, Sequelize.DataTypes);
+db.RestaurantStats = require("./RestaurantStats")(
+  sequelize,
+  Sequelize.DataTypes
+);
+db.Review = require("./Review")(sequelize, Sequelize.DataTypes);
 
 // Define Associations
 Object.keys(db).forEach((modelName) => {

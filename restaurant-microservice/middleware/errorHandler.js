@@ -2,6 +2,7 @@ const {
   ValidationError,
   UniqueConstraintError,
   DatabaseError,
+  ForeignKeyConstraintError,
 } = require("sequelize");
 
 /**
@@ -10,12 +11,12 @@ const {
 const errorHandler = (error, req, res, next) => {
   console.error("Error occurred:", {
     message: error.message,
-    stack: error.stack,
+    stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     url: req.url,
     method: req.method,
     ip: req.ip,
     userAgent: req.get("User-Agent"),
-    userId: req.user?.id || "anonymous",
+    userId: req.user?.uuid || "anonymous",
     timestamp: new Date().toISOString(),
   });
 
@@ -46,6 +47,15 @@ const errorHandler = (error, req, res, next) => {
     });
   }
 
+  // Sequelize foreign key constraint errors
+  if (error instanceof ForeignKeyConstraintError) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid Reference",
+      message: "Referenced record does not exist",
+    });
+  }
+
   // Sequelize database errors
   if (error instanceof DatabaseError) {
     return res.status(500).json({
@@ -72,12 +82,12 @@ const errorHandler = (error, req, res, next) => {
     });
   }
 
-  // Multer upload errors
-  if (error.code === "LIMIT_FILE_SIZE") {
-    return res.status(400).json({
+  // Axios errors (for inter-service communication)
+  if (error.isAxiosError) {
+    return res.status(503).json({
       success: false,
-      error: "File Too Large",
-      message: "Uploaded file exceeds size limit",
+      error: "Service Unavailable",
+      message: "External service is temporarily unavailable",
     });
   }
 

@@ -1,9 +1,9 @@
 const jwt = require("jsonwebtoken");
-const { User } = require("../models");
+const axios = require("axios");
 
 /**
- * JWT Authentication Middleware
- * Validates JWT tokens and attaches user to request object
+ * Authentication middleware that validates JWT tokens
+ * Can work independently or communicate with User microservice
  */
 const authMiddleware = async (req, res, next) => {
   try {
@@ -19,43 +19,39 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    // Verify token
+    // Verify JWT token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Get user from database
-    const user = await User.findByPk(decoded.id);
+    // For restaurant microservice, we mainly need the user UUID
+    // We can optionally call User microservice for full user data
+    if (process.env.USER_SERVICE_URL) {
+      try {
+        const userResponse = await axios.get(
+          `${process.env.USER_SERVICE_URL}/api/users/internal/${decoded.uuid}`,
+          { timeout: 5000 }
+        );
 
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: "User not found",
-        message: "The user associated with this token no longer exists",
-      });
+        if (userResponse.data.success) {
+          req.user = userResponse.data.user;
+        } else {
+          // Fallback to token data if user service is unavailable
+          req.user = { uuid: decoded.uuid, userType: decoded.userType };
+        }
+      } catch (error) {
+        console.warn(
+          "User service unavailable, using token data:",
+          error.message
+        );
+        req.user = { uuid: decoded.uuid, userType: decoded.userType };
+      }
+    } else {
+      // Use token data directly
+      req.user = { uuid: decoded.uuid, userType: decoded.userType };
     }
 
-    // Check if user is active
-    if (!user.isActive) {
-      return res.status(401).json({
-        success: false,
-        error: "Account disabled",
-        message: "Your account has been disabled. Please contact support.",
-      });
-    }
-
-    // Check if account is locked
-    if (user.isAccountLocked()) {
-      return res.status(423).json({
-        success: false,
-        error: "Account locked",
-        message: "Account is temporarily locked. Please try again later.",
-      });
-    }
-
-    // Attach user to request object
-    req.user = user;
-    req.userId = user.id;
-    req.userUuid = user.uuid;
-    req.userType = user.userType;
+    // Attach user info to request headers for downstream services
+    req.headers["x-user-id"] = req.user.uuid;
+    req.headers["x-user-type"] = req.user.userType;
 
     next();
   } catch (error) {
@@ -85,7 +81,7 @@ const authMiddleware = async (req, res, next) => {
 };
 
 /**
- * Optional Authentication Middleware
+ * Optional authentication middleware
  * Attaches user if token is valid, but doesn't require authentication
  */
 const optionalAuthMiddleware = async (req, res, next) => {
@@ -95,14 +91,9 @@ const optionalAuthMiddleware = async (req, res, next) => {
 
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findByPk(decoded.id);
-
-      if (user && user.isActive && !user.isAccountLocked()) {
-        req.user = user;
-        req.userId = user.id;
-        req.userUuid = user.uuid;
-        req.userType = user.userType;
-      }
+      req.user = { uuid: decoded.uuid, userType: decoded.userType };
+      req.headers["x-user-id"] = req.user.uuid;
+      req.headers["x-user-type"] = req.user.userType;
     }
 
     next();
