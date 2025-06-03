@@ -13,11 +13,11 @@ if (caCertPath && fs.existsSync(caCertPath)) {
 
 module.exports = {
   development: {
-    username: process.env.DB_USERNAME || "avnadmin",
+    username: process.env.DB_USERNAME ,
     password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME || "default_db",
+    database: process.env.DB_NAME,
     host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 21850,
+    port: process.env.DB_PORT,
     dialect: "mysql",
     dialectOptions: {
       ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
@@ -26,9 +26,9 @@ module.exports = {
   test: {
     username: process.env.DB_USERNAME,
     password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME_TEST || "user_service_test_db",
+    database: process.env.DB_NAME_TEST,
     host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 3306,
+    port: process.env.DB_PORT,
     dialect: "mysql",
     dialectOptions: {
       ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
