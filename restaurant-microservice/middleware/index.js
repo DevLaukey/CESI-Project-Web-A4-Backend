@@ -206,4 +206,3 @@ module.exports = {
   errorHandler,
   notFoundHandler,
 };
-// Export all middleware functions for use in the application
