@@ -1,4 +1,4 @@
-onst Reward = require('../models/Reward');
+const Reward = require('../models/Reward');
 const Referral = require('../models/Referral');
 const Campaign = require('../models/Campaign');
 const logger = require('../utils/logger');
