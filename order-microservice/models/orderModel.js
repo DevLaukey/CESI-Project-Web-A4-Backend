@@ -1,4 +1,4 @@
-const db = require("./db");
+const db = require("../config/db");
 
 const Order = {
   create: async ({ user_id, item_name, quantity, status }) => {
