@@ -1,29 +1,36 @@
 const Order = require("../models/orderModel");
+const emitter = require("../utils/eventEmitter");
 
 exports.createOrder = async (req, res) => {
-  const { user_id, item_name, quantity } = req.body;
+  const { user_id, restaurant_id, payment_id, delivery_address, items } =
+    req.body;
 
   if (
-    typeof user_id !== "number" ||
-    typeof item_name !== "string" ||
-    typeof quantity !== "number"
+    !user_id ||
+    !restaurant_id ||
+    !payment_id ||
+    !delivery_address ||
+    !items
   ) {
-    return res.status(400).json({ error: "Invalid input" });
+    return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    const newOrder = {
+    const { insertId } = await Order.create({
       user_id,
-      item_name,
-      quantity,
-      status: "pending",
-    };
-    const result = await Order.create(newOrder);
-    res
-      .status(201)
-      .json({ message: "Order created", orderId: result.insertId });
+      restaurant_id,
+      payment_id,
+      delivery_address,
+      items,
+    });
+    res.status(201).json({ orderId: insertId });
+
+    emitter.emit("OrderCreated", { orderId: insertId, user_id, restaurant_id });
   } catch (err) {
     console.error(err);
+    if (err.message.includes("already exists")) {
+      return res.status(409).json({ error: err.message });
+    }
     res.status(500).json({ error: "Failed to create order" });
   }
 };
@@ -49,5 +56,32 @@ exports.getOrderById = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch order" });
+  }
+};
+
+exports.updateOrderStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const validStatuses = [
+    "pending",
+    "confirmed",
+    "preparing",
+    "out_for_delivery",
+    "delivered",
+    "cancelled",
+  ];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
+  try {
+    await Order.updateStatus(id, status);
+    res.json({ message: "Status updated" });
+
+    emitter.emit("OrderStatusUpdated", { id, status });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update status" });
   }
 };
