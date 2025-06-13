@@ -71,6 +71,7 @@ app.get("/health", (req, res) => {
 app.use("/api/deliveries", deliveryRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/tracking", trackingRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
