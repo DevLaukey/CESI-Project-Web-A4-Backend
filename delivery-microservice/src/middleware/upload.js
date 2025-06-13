@@ -140,6 +140,38 @@ const uploadDocument = createUploadConfig(
 );
 
 /**
+ * Driver documents upload configuration
+ */
+const uploadDriverDocs = multer({
+  storage: createStorage(documentsDir, "driver_"),
+  limits: {
+    fileSize: fileSizeLimits.document,
+    files: 10, // Maximum 10 files per request
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow both documents and images for driver documents
+    const documentTypes = /pdf|doc|docx|txt/;
+    const imageTypes = /jpeg|jpg|png|gif|webp/;
+
+    const extname =
+      documentTypes.test(path.extname(file.originalname).toLowerCase()) ||
+      imageTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype =
+      documentTypes.test(file.mimetype) || imageTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      const error = new Error(
+        "Invalid file type. Allowed: PDF, DOC, DOCX, TXT, JPG, PNG"
+      );
+      error.code = "INVALID_FILE_TYPE";
+      cb(error);
+    }
+  },
+});
+
+/**
  * Multiple file upload for delivery issues
  */
 const uploadIssuePhotos = createUploadConfig(
@@ -290,6 +322,90 @@ const issuePhotos = (req, res, next) => {
       logger.info("Issue photos uploaded", {
         count: req.files.length,
         totalSize: req.files.reduce((sum, file) => sum + file.size, 0),
+        userId: req.user?.id,
+      });
+    }
+
+    next();
+  });
+};
+
+/**
+ * Driver documents upload (license, insurance, vehicle registration, etc.)
+ */
+const driverDocuments = (req, res, next) => {
+  const upload = uploadDriverDocs.fields([
+    { name: "drivers_license", maxCount: 2 }, // Front and back
+    { name: "insurance_certificate", maxCount: 1 },
+    { name: "vehicle_registration", maxCount: 1 },
+    { name: "vehicle_inspection", maxCount: 1 },
+    { name: "profile_photo", maxCount: 1 },
+    { name: "background_check", maxCount: 1 },
+    { name: "other_documents", maxCount: 3 },
+  ]);
+
+  upload(req, res, (err) => {
+    if (err) {
+      return handleUploadError(err, res);
+    }
+
+    req.uploadedDocuments = {};
+
+    // Process each document type
+    if (req.files) {
+      Object.keys(req.files).forEach((fieldName) => {
+        req.uploadedDocuments[fieldName] = req.files[fieldName].map((file) => ({
+          ...file,
+          url: `/uploads/documents/${file.filename}`,
+          type: fieldName,
+          uploadedAt: new Date(),
+        }));
+      });
+
+      logger.info("Driver documents uploaded", {
+        documentTypes: Object.keys(req.uploadedDocuments),
+        totalFiles: Object.values(req.uploadedDocuments).flat().length,
+        userId: req.user?.id,
+      });
+    }
+
+    next();
+  });
+};
+
+/**
+ * Vehicle documents upload (registration, insurance, inspection)
+ */
+const vehicleDocuments = (req, res, next) => {
+  const upload = uploadDriverDocs.fields([
+    { name: "vehicle_registration", maxCount: 1 },
+    { name: "vehicle_insurance", maxCount: 1 },
+    { name: "vehicle_inspection", maxCount: 1 },
+    { name: "vehicle_photos", maxCount: 5 },
+    { name: "vehicle_documents", maxCount: 3 },
+  ]);
+
+  upload(req, res, (err) => {
+    if (err) {
+      return handleUploadError(err, res);
+    }
+
+    req.uploadedDocuments = {};
+
+    // Process each document type
+    if (req.files) {
+      Object.keys(req.files).forEach((fieldName) => {
+        req.uploadedDocuments[fieldName] = req.files[fieldName].map((file) => ({
+          ...file,
+          url: `/uploads/documents/${file.filename}`,
+          type: fieldName,
+          uploadedAt: new Date(),
+        }));
+      });
+
+      logger.info("Vehicle documents uploaded", {
+        documentTypes: Object.keys(req.uploadedDocuments),
+        totalFiles: Object.values(req.uploadedDocuments).flat().length,
         userId: req.user?.id,
       });
     }
@@ -497,12 +613,19 @@ const validateUploadedFiles = (req, res, next) => {
 };
 
 module.exports = {
+  // Main upload functions
   singleDeliveryPhoto,
   multipleDeliveryPhotos,
   singleSignature,
   singleDocument,
   issuePhotos,
   deliveryProof,
+
+  // Driver and vehicle uploads
+  driverDocuments,
+  vehicleDocuments,
+
+  // Utility functions
   validateUploadedFiles,
   deleteFile,
   cleanupOldFiles,

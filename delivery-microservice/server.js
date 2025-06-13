@@ -8,6 +8,7 @@ const rateLimit = require("express-rate-limit");
 const logger = require("./src/utils/logger");
 const database = require("./src/config/database");
 const deliveryRoutes = require("./src/routes/deliveryRoutes");
+// const adminRoutes = require("./src/routes/adminRoutes");
 const driverRoutes = require("./src/routes/driverRoutes");
 const trackingRoutes = require("./src/routes/trackingRoutes");
 const errorHandler = require("./src/middleware/errorHandler");
@@ -71,10 +72,10 @@ app.get("/health", (req, res) => {
 app.use("/api/deliveries", deliveryRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/tracking", trackingRoutes);
-app.use("/api/admin", adminRoutes);
+// app.use("/api/admin", adminRoutes);
 
 // Error handling middleware
-app.use(errorHandler);
+// app.use(errorHandler);
 
 // 404 handler
 app.use("*", (req, res) => {

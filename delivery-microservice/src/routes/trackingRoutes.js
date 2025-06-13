@@ -1,7 +1,7 @@
 
 const express = require("express");
 const TrackingController = require("../controllers/trackingController");
-const auth = require("../middleware/auth");
+const auth = require("../middleware/authMiddleware");
 const rateLimitMiddleware = require("../middleware/rateLimit");
 const validateLocation = require("../middleware/validateLocation");
 const router = express.Router();
@@ -38,7 +38,6 @@ router.get(
 // Get real-time delivery location
 router.get(
   "/:trackingNumber/location",
-  rateLimitMiddleware.trackingRate,
   TrackingController.getRealTimeLocation
 );
 

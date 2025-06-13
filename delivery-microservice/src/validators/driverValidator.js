@@ -1,271 +1,503 @@
 const Joi = require("joi");
 
-// ================================================================
-// DRIVER VALIDATION SCHEMAS
-// ================================================================
+/**
+ * Driver Input Validators
+ * Validates request data for driver endpoints
+ */
 
-// Validate driver registration
-const validateDriver = (data) => {
+// Driver registration validation
+const validateDriverRegistration = (data) => {
   const schema = Joi.object({
-    // Personal Information
-    license_number: Joi.string().min(5).max(50).required(),
-    license_expiry: Joi.date().greater("now").required(),
-    phone_number: Joi.string()
-      .pattern(/^\+?[\d\s\-\(\)]{10,20}$/)
-      .required(),
+    first_name: Joi.string().min(2).max(50).required().messages({
+      "string.base": "First name must be a string",
+      "string.min": "First name must be at least 2 characters",
+      "string.max": "First name cannot exceed 50 characters",
+      "any.required": "First name is required",
+    }),
 
-    // Vehicle Information
+    last_name: Joi.string().min(2).max(50).required().messages({
+      "string.base": "Last name must be a string",
+      "string.min": "Last name must be at least 2 characters",
+      "string.max": "Last name cannot exceed 50 characters",
+      "any.required": "Last name is required",
+    }),
+
+    phone: Joi.string()
+      .pattern(/^\+?[\d\s-()]+$/)
+      .min(10)
+      .max(20)
+      .required()
+      .messages({
+        "string.base": "Phone must be a string",
+        "string.pattern.base": "Phone must be a valid phone number",
+        "string.min": "Phone must be at least 10 characters",
+        "string.max": "Phone cannot exceed 20 characters",
+        "any.required": "Phone is required",
+      }),
+
+    date_of_birth: Joi.date().max("now").required().messages({
+      "date.base": "Date of birth must be a valid date",
+      "date.max": "Date of birth cannot be in the future",
+      "any.required": "Date of birth is required",
+    }),
+
+    license_number: Joi.string().min(5).max(20).required().messages({
+      "string.base": "License number must be a string",
+      "string.min": "License number must be at least 5 characters",
+      "string.max": "License number cannot exceed 20 characters",
+      "any.required": "License number is required",
+    }),
+
+    license_expiry: Joi.date().min("now").required().messages({
+      "date.base": "License expiry must be a valid date",
+      "date.min": "License must not be expired",
+      "any.required": "License expiry is required",
+    }),
+
     vehicle_type: Joi.string()
-      .valid("bike", "scooter", "car", "truck", "bicycle")
-      .required(),
-    vehicle_make: Joi.string().max(50).optional(),
-    vehicle_model: Joi.string().max(50).optional(),
+      .valid("motorcycle", "scooter", "bicycle", "car", "van", "truck")
+      .required()
+      .messages({
+        "string.base": "Vehicle type must be a string",
+        "any.only": "Invalid vehicle type",
+        "any.required": "Vehicle type is required",
+      }),
+
+    vehicle_make: Joi.string().min(2).max(50).required().messages({
+      "string.base": "Vehicle make must be a string",
+      "string.min": "Vehicle make must be at least 2 characters",
+      "string.max": "Vehicle make cannot exceed 50 characters",
+      "any.required": "Vehicle make is required",
+    }),
+
+    vehicle_model: Joi.string().min(2).max(50).required().messages({
+      "string.base": "Vehicle model must be a string",
+      "string.min": "Vehicle model must be at least 2 characters",
+      "string.max": "Vehicle model cannot exceed 50 characters",
+      "any.required": "Vehicle model is required",
+    }),
+
     vehicle_year: Joi.number()
       .integer()
-      .min(1990)
+      .min(1980)
       .max(new Date().getFullYear() + 1)
-      .optional(),
-    vehicle_color: Joi.string().max(30).optional(),
-    license_plate: Joi.string().min(2).max(20).required(),
+      .required()
+      .messages({
+        "number.base": "Vehicle year must be a number",
+        "number.integer": "Vehicle year must be an integer",
+        "number.min": "Vehicle year must be at least 1980",
+        "number.max": "Vehicle year cannot be in the future",
+        "any.required": "Vehicle year is required",
+      }),
 
-    // Insurance Information
-    insurance_number: Joi.string().max(100).optional(),
-    insurance_expiry: Joi.date().greater("now").optional(),
+    vehicle_license: Joi.string().min(3).max(20).required().messages({
+      "string.base": "Vehicle license must be a string",
+      "string.min": "Vehicle license must be at least 3 characters",
+      "string.max": "Vehicle license cannot exceed 20 characters",
+      "any.required": "Vehicle license is required",
+    }),
 
-    // Banking Information
-    bank_account_holder: Joi.string().max(100).optional(),
-    bank_account_number: Joi.string().max(50).optional(),
-    bank_routing_number: Joi.string().max(20).optional(),
-    bank_name: Joi.string().max(100).optional(),
+    insurance_company: Joi.string().min(2).max(100).required().messages({
+      "string.base": "Insurance company must be a string",
+      "string.min": "Insurance company must be at least 2 characters",
+      "string.max": "Insurance company cannot exceed 100 characters",
+      "any.required": "Insurance company is required",
+    }),
 
-    // Emergency Contact
-    emergency_contact_name: Joi.string().max(100).required(),
+    insurance_policy: Joi.string().min(5).max(50).required().messages({
+      "string.base": "Insurance policy must be a string",
+      "string.min": "Insurance policy must be at least 5 characters",
+      "string.max": "Insurance policy cannot exceed 50 characters",
+      "any.required": "Insurance policy is required",
+    }),
+
+    insurance_expiry: Joi.date().min("now").required().messages({
+      "date.base": "Insurance expiry must be a valid date",
+      "date.min": "Insurance must not be expired",
+      "any.required": "Insurance expiry is required",
+    }),
+
+    emergency_contact_name: Joi.string().min(2).max(100).required().messages({
+      "string.base": "Emergency contact name must be a string",
+      "string.min": "Emergency contact name must be at least 2 characters",
+      "string.max": "Emergency contact name cannot exceed 100 characters",
+      "any.required": "Emergency contact name is required",
+    }),
+
     emergency_contact_phone: Joi.string()
-      .pattern(/^\+?[\d\s\-\(\)]{10,20}$/)
-      .required(),
-    emergency_contact_relationship: Joi.string().max(50).required(),
+      .pattern(/^\+?[\d\s-()]+$/)
+      .min(10)
+      .max(20)
+      .required()
+      .messages({
+        "string.base": "Emergency contact phone must be a string",
+        "string.pattern.base":
+          "Emergency contact phone must be a valid phone number",
+        "string.min": "Emergency contact phone must be at least 10 characters",
+        "string.max": "Emergency contact phone cannot exceed 20 characters",
+        "any.required": "Emergency contact phone is required",
+      }),
 
-    // Work Preferences
-    preferred_work_areas: Joi.array().items(Joi.string()).max(10).optional(),
-    max_delivery_radius: Joi.number().min(1).max(100).default(15),
-    work_schedule: Joi.object({
-      monday: Joi.object({
-        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        available: Joi.boolean().default(true),
-      }).optional(),
-      tuesday: Joi.object({
-        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        available: Joi.boolean().default(true),
-      }).optional(),
-      wednesday: Joi.object({
-        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        available: Joi.boolean().default(true),
-      }).optional(),
-      thursday: Joi.object({
-        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        available: Joi.boolean().default(true),
-      }).optional(),
-      friday: Joi.object({
-        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        available: Joi.boolean().default(true),
-      }).optional(),
-      saturday: Joi.object({
-        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        available: Joi.boolean().default(true),
-      }).optional(),
-      sunday: Joi.object({
-        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
-        available: Joi.boolean().default(true),
-      }).optional(),
-    }).optional(),
+    bank_account_number: Joi.string().min(8).max(20).optional().messages({
+      "string.base": "Bank account number must be a string",
+      "string.min": "Bank account number must be at least 8 characters",
+      "string.max": "Bank account number cannot exceed 20 characters",
+    }),
 
-    // Referral
-    referral_code: Joi.string().max(20).optional(),
+    bank_routing_number: Joi.string().min(6).max(12).optional().messages({
+      "string.base": "Bank routing number must be a string",
+      "string.min": "Bank routing number must be at least 6 characters",
+      "string.max": "Bank routing number cannot exceed 12 characters",
+    }),
 
-    // Documents (file uploads handled separately)
-    documents: Joi.object({
-      license_front: Joi.string().optional(),
-      license_back: Joi.string().optional(),
-      insurance_card: Joi.string().optional(),
-      vehicle_registration: Joi.string().optional(),
-      background_check: Joi.string().optional(),
-      profile_photo: Joi.string().optional(),
-    }).optional(),
+    preferred_work_areas: Joi.array()
+      .items(Joi.string())
+      .max(10)
+      .optional()
+      .messages({
+        "array.base": "Preferred work areas must be an array",
+        "array.max": "Cannot specify more than 10 work areas",
+      }),
 
-    // Agreement
-    terms_accepted: Joi.boolean().valid(true).required(),
-    privacy_policy_accepted: Joi.boolean().valid(true).required(),
-    background_check_consent: Joi.boolean().valid(true).required(),
+    languages_spoken: Joi.array()
+      .items(Joi.string())
+      .max(5)
+      .optional()
+      .messages({
+        "array.base": "Languages spoken must be an array",
+        "array.max": "Cannot specify more than 5 languages",
+      }),
   });
 
-  return schema.validate(data);
+  return schema.validate(data, { abortEarly: false });
 };
 
-// Validate driver profile update
+// Driver profile update validation
 const validateDriverUpdate = (data) => {
   const schema = Joi.object({
-    phone_number: Joi.string()
-      .pattern(/^\+?[\d\s\-\(\)]{10,20}$/)
+    first_name: Joi.string().min(2).max(50).optional(),
+    last_name: Joi.string().min(2).max(50).optional(),
+    phone: Joi.string()
+      .pattern(/^\+?[\d\s-()]+$/)
+      .min(10)
+      .max(20)
       .optional(),
-    vehicle_make: Joi.string().max(50).optional(),
-    vehicle_model: Joi.string().max(50).optional(),
-    vehicle_year: Joi.number()
-      .integer()
-      .min(1990)
-      .max(new Date().getFullYear() + 1)
-      .optional(),
-    vehicle_color: Joi.string().max(30).optional(),
-    license_plate: Joi.string().min(2).max(20).optional(),
-    insurance_number: Joi.string().max(100).optional(),
-    insurance_expiry: Joi.date().greater("now").optional(),
-    bank_account_holder: Joi.string().max(100).optional(),
-    bank_account_number: Joi.string().max(50).optional(),
-    bank_routing_number: Joi.string().max(20).optional(),
-    bank_name: Joi.string().max(100).optional(),
-    emergency_contact_name: Joi.string().max(100).optional(),
+
+    emergency_contact_name: Joi.string().min(2).max(100).optional(),
     emergency_contact_phone: Joi.string()
-      .pattern(/^\+?[\d\s\-\(\)]{10,20}$/)
+      .pattern(/^\+?[\d\s-()]+$/)
+      .min(10)
+      .max(20)
       .optional(),
-    emergency_contact_relationship: Joi.string().max(50).optional(),
+
+    bank_account_number: Joi.string().min(8).max(20).optional().allow(""),
+    bank_routing_number: Joi.string().min(6).max(12).optional().allow(""),
+
     preferred_work_areas: Joi.array().items(Joi.string()).max(10).optional(),
-    max_delivery_radius: Joi.number().min(1).max(100).optional(),
-  });
+    languages_spoken: Joi.array().items(Joi.string()).max(5).optional(),
 
-  return schema.validate(data);
-};
-
-// Validate driver availability update
-const validateAvailabilityUpdate = (data) => {
-  const schema = Joi.object({
-    available: Joi.boolean().required(),
-    location: Joi.object({
-      lat: Joi.number().min(-90).max(90).required(),
-      lng: Joi.number().min(-180).max(180).required(),
-      accuracy: Joi.number().min(0).optional(),
-    }).when("available", {
-      is: true,
-      then: Joi.required(),
-      otherwise: Joi.optional(),
+    profile_photo: Joi.string().uri().optional().messages({
+      "string.uri": "Profile photo must be a valid URL",
     }),
-    work_until: Joi.date().greater("now").optional(),
-    break_duration: Joi.number().min(0).max(480).optional(), // minutes
+
+    bio: Joi.string().max(500).optional().allow("").messages({
+      "string.max": "Bio cannot exceed 500 characters",
+    }),
   });
 
-  return schema.validate(data);
+  return schema.validate(data, { abortEarly: false });
 };
 
-// Validate driver vehicle update
-const validateVehicleUpdate = (data) => {
+// Location update validation
+const validateLocationUpdate = (data) => {
+  const schema = Joi.object({
+    latitude: Joi.number().min(-90).max(90).required().messages({
+      "number.base": "Latitude must be a number",
+      "number.min": "Latitude must be at least -90",
+      "number.max": "Latitude must be at most 90",
+      "any.required": "Latitude is required",
+    }),
+
+    longitude: Joi.number().min(-180).max(180).required().messages({
+      "number.base": "Longitude must be a number",
+      "number.min": "Longitude must be at least -180",
+      "number.max": "Longitude must be at most 180",
+      "any.required": "Longitude is required",
+    }),
+
+    heading: Joi.number().min(0).max(360).optional().messages({
+      "number.base": "Heading must be a number",
+      "number.min": "Heading must be at least 0",
+      "number.max": "Heading must be at most 360",
+    }),
+
+    speed: Joi.number().min(0).max(200).optional().messages({
+      "number.base": "Speed must be a number",
+      "number.min": "Speed cannot be negative",
+      "number.max": "Speed cannot exceed 200 km/h",
+    }),
+
+    accuracy: Joi.number().min(0).max(1000).optional().messages({
+      "number.base": "Accuracy must be a number",
+      "number.min": "Accuracy cannot be negative",
+      "number.max": "Accuracy cannot exceed 1000 meters",
+    }),
+  });
+
+  return schema.validate(data, { abortEarly: false });
+};
+
+// Vehicle information validation
+const validateVehicleInfo = (data) => {
   const schema = Joi.object({
     vehicle_type: Joi.string()
-      .valid("bike", "scooter", "car", "truck", "bicycle")
+      .valid("motorcycle", "scooter", "bicycle", "car", "van", "truck")
       .optional(),
-    vehicle_make: Joi.string().max(50).optional(),
-    vehicle_model: Joi.string().max(50).optional(),
+
+    vehicle_make: Joi.string().min(2).max(50).optional(),
+    vehicle_model: Joi.string().min(2).max(50).optional(),
     vehicle_year: Joi.number()
       .integer()
-      .min(1990)
+      .min(1980)
       .max(new Date().getFullYear() + 1)
       .optional(),
-    vehicle_color: Joi.string().max(30).optional(),
-    license_plate: Joi.string().min(2).max(20).optional(),
-    insurance_number: Joi.string().max(100).optional(),
-    insurance_expiry: Joi.date().greater("now").optional(),
+    vehicle_license: Joi.string().min(3).max(20).optional(),
+    vehicle_color: Joi.string().min(3).max(30).optional(),
+
+    insurance_company: Joi.string().min(2).max(100).optional(),
+    insurance_policy: Joi.string().min(5).max(50).optional(),
+    insurance_expiry: Joi.date().min("now").optional(),
+
+    registration_expiry: Joi.date().min("now").optional(),
+    inspection_expiry: Joi.date().min("now").optional(),
+
+    vehicle_features: Joi.array()
+      .items(
+        Joi.string().valid(
+          "air_conditioning",
+          "gps_navigation",
+          "bluetooth",
+          "backup_camera",
+          "heated_seats",
+          "sunroof",
+          "leather_seats",
+          "premium_sound"
+        )
+      )
+      .optional(),
   });
 
-  return schema.validate(data);
+  return schema.validate(data, { abortEarly: false });
 };
 
-// Validate driver schedule update
-const validateScheduleUpdate = (data) => {
-  const daySchema = Joi.object({
-    start: Joi.string()
-      .pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)
-      .required(),
-    end: Joi.string()
-      .pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)
-      .required(),
-    available: Joi.boolean().default(true),
-  }).custom((value, helpers) => {
-    const start = parseInt(value.start.replace(":", ""));
-    const end = parseInt(value.end.replace(":", ""));
-    if (start >= end) {
-      return helpers.error("custom.invalidTimeRange");
-    }
-    return value;
-  });
-
+// Availability toggle validation
+const validateAvailabilityToggle = (data) => {
   const schema = Joi.object({
-    monday: daySchema.optional(),
-    tuesday: daySchema.optional(),
-    wednesday: daySchema.optional(),
-    thursday: daySchema.optional(),
-    friday: daySchema.optional(),
-    saturday: daySchema.optional(),
-    sunday: daySchema.optional(),
-    timezone: Joi.string().optional(),
+    available: Joi.boolean().required().messages({
+      "boolean.base": "Available must be a boolean",
+      "any.required": "Available status is required",
+    }),
+
+    location: Joi.object({
+      latitude: Joi.number().min(-90).max(90).required(),
+      longitude: Joi.number().min(-180).max(180).required(),
+    }).optional(),
   });
 
-  return schema.validate(data, {
-    messages: {
-      "custom.invalidTimeRange": "Start time must be before end time",
-    },
-  });
+  return schema.validate(data, { abortEarly: false });
 };
 
-// Validate vehicle issue report
+// Work schedule validation
+const validateWorkSchedule = (data) => {
+  const schema = Joi.object({
+    schedule: Joi.object({
+      monday: Joi.object({
+        enabled: Joi.boolean().required(),
+        start_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+        end_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+      }).optional(),
+
+      tuesday: Joi.object({
+        enabled: Joi.boolean().required(),
+        start_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+        end_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+      }).optional(),
+
+      wednesday: Joi.object({
+        enabled: Joi.boolean().required(),
+        start_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+        end_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+      }).optional(),
+
+      thursday: Joi.object({
+        enabled: Joi.boolean().required(),
+        start_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+        end_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+      }).optional(),
+
+      friday: Joi.object({
+        enabled: Joi.boolean().required(),
+        start_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+        end_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+      }).optional(),
+
+      saturday: Joi.object({
+        enabled: Joi.boolean().required(),
+        start_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+        end_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+      }).optional(),
+
+      sunday: Joi.object({
+        enabled: Joi.boolean().required(),
+        start_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+        end_time: Joi.string()
+          .pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)
+          .when("enabled", {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          }),
+      }).optional(),
+    }).required(),
+  });
+
+  return schema.validate(data, { abortEarly: false });
+};
+
+// Vehicle issue report validation
 const validateVehicleIssue = (data) => {
   const schema = Joi.object({
     issue_type: Joi.string()
       .valid(
-        "breakdown",
-        "accident",
+        "mechanical",
+        "electrical",
+        "tire_issue",
+        "brake_problem",
+        "engine_trouble",
+        "fuel_issue",
+        "accident_damage",
         "maintenance_needed",
-        "damage",
-        "theft",
         "other"
       )
-      .required(),
-    description: Joi.string().min(10).max(1000).required(),
+      .required()
+      .messages({
+        "string.base": "Issue type must be a string",
+        "any.only": "Invalid issue type",
+        "any.required": "Issue type is required",
+      }),
+
+    description: Joi.string().min(10).max(1000).required().messages({
+      "string.base": "Description must be a string",
+      "string.min": "Description must be at least 10 characters",
+      "string.max": "Description cannot exceed 1000 characters",
+      "any.required": "Description is required",
+    }),
+
     severity: Joi.string()
       .valid("low", "medium", "high", "critical")
-      .default("medium"),
-    affects_deliveries: Joi.boolean().default(true),
+      .default("medium")
+      .messages({
+        "string.base": "Severity must be a string",
+        "any.only": "Severity must be one of: low, medium, high, critical",
+      }),
+
+    affects_delivery: Joi.boolean().default(true).messages({
+      "boolean.base": "Affects delivery must be a boolean",
+    }),
+
     location: Joi.object({
-      lat: Joi.number().min(-90).max(90).optional(),
-      lng: Joi.number().min(-180).max(180).optional(),
-      address: Joi.string().max(200).optional(),
+      latitude: Joi.number().min(-90).max(90).required(),
+      longitude: Joi.number().min(-180).max(180).required(),
     }).optional(),
-    photos: Joi.array().items(Joi.string()).max(5).optional(),
-    estimated_repair_time: Joi.string()
-      .valid(
-        "less_than_hour",
-        "1_to_4_hours",
-        "4_to_24_hours",
-        "1_to_3_days",
-        "more_than_3_days",
-        "unknown"
-      )
-      .optional(),
-    insurance_claim: Joi.boolean().default(false),
-    police_report: Joi.boolean().default(false),
   });
 
-  return schema.validate(data);
+  return schema.validate(data, { abortEarly: false });
 };
 
 module.exports = {
-  validateDriver,
+  validateDriverRegistration,
   validateDriverUpdate,
-  validateAvailabilityUpdate,
-  validateVehicleUpdate,
-  validateScheduleUpdate,
+  validateLocationUpdate,
+  validateVehicleInfo,
+  validateAvailabilityToggle,
+  validateWorkSchedule,
   validateVehicleIssue,
 };
