@@ -4,12 +4,21 @@ const logger = require("../utils/logger");
 const {
   validateDelivery,
   validateDeliveryUpdate,
+  validateLocationUpdate,
+  validateQRCode,
+  validateRating,
+  validateIssueReport,
+  validateEmergencyStop,
 } = require("../validators/deliveryValidator");
-const externalServices = require("../services/externalServices");
 const deliveryAssignment = require("../services/deliveryAssignment");
+const externalServices = require("../services/externalServices");
 const QRCode = require("qrcode");
 
 class DeliveryController {
+  // ================================================================
+  // SERVICE-TO-SERVICE METHODS
+  // ================================================================
+
   // Create delivery request
   static async createDelivery(req, res) {
     try {
@@ -86,13 +95,15 @@ class DeliveryController {
 
         // Update socket for real-time
         const socketManager = req.app.get("socketManager");
-        socketManager.notifyDriver(
-          assignment.driver.user_id,
-          "delivery_assigned",
-          {
-            delivery: delivery,
-          }
-        );
+        if (socketManager) {
+          socketManager.notifyDriver(
+            assignment.driver.user_id,
+            "delivery_assigned",
+            {
+              delivery: delivery,
+            }
+          );
+        }
       }
 
       logger.info(
@@ -116,6 +127,184 @@ class DeliveryController {
       });
     }
   }
+
+  // Assign delivery to driver (internal)
+  static async assignDeliveryInternal(req, res) {
+    try {
+      const { id } = req.params;
+      const { driver_id } = req.body;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      const driver = await Driver.findById(driver_id);
+      if (!driver || !driver.is_verified || !driver.is_available) {
+        return res.status(400).json({
+          success: false,
+          message: "Driver not available",
+        });
+      }
+
+      // Assign delivery to driver
+      const assignedDelivery = await Delivery.assignDriver(id, driver_id);
+      await Driver.updateAvailability(driver_id, false);
+
+      // Send notifications
+      await this.sendStatusNotifications(assignedDelivery);
+
+      res.json({
+        success: true,
+        message: "Delivery assigned successfully",
+        data: assignedDelivery,
+      });
+    } catch (error) {
+      logger.error("Assign delivery internal error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Update delivery status (from external services)
+  static async updateDeliveryStatusInternal(req, res) {
+    try {
+      const { id } = req.params;
+      const { status, metadata } = req.body;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      const updatedDelivery = await Delivery.updateStatus(id, status, metadata);
+      await this.sendStatusNotifications(updatedDelivery);
+
+      // Real-time updates
+      const socketManager = req.app.get("socketManager");
+      if (socketManager) {
+        socketManager.broadcastDeliveryUpdate(updatedDelivery);
+      }
+
+      res.json({
+        success: true,
+        message: "Delivery status updated",
+        data: updatedDelivery,
+      });
+    } catch (error) {
+      logger.error("Update delivery status internal error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // PUBLIC METHODS
+  // ================================================================
+
+  // Track delivery by tracking number
+  static async trackDelivery(req, res) {
+    try {
+      const { trackingNumber } = req.params;
+      const delivery = await Delivery.findByTrackingNumber(trackingNumber);
+
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Get driver location if assigned and in transit
+      let driverLocation = null;
+      if (
+        delivery.driver_id &&
+        ["assigned", "picked_up", "in_transit"].includes(delivery.status)
+      ) {
+        const driver = await Driver.findById(delivery.driver_id);
+        if (driver && driver.current_lat && driver.current_lng) {
+          driverLocation = {
+            lat: driver.current_lat,
+            lng: driver.current_lng,
+            last_updated: driver.last_location_update,
+          };
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          ...delivery,
+          driver_location: driverLocation,
+        },
+      });
+    } catch (error) {
+      logger.error("Track delivery error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Get delivery ETA
+  static async getDeliveryETA(req, res) {
+    try {
+      const { trackingNumber } = req.params;
+      const delivery = await Delivery.findByTrackingNumber(trackingNumber);
+
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      let eta = delivery.estimated_delivery_time;
+
+      // If driver is assigned, calculate real-time ETA
+      if (delivery.driver_id && delivery.status === "in_transit") {
+        const driver = await Driver.findById(delivery.driver_id);
+        if (driver && driver.current_lat && driver.current_lng) {
+          eta = await this.calculateRealTimeETA(
+            driver.current_lat,
+            driver.current_lng,
+            delivery.delivery_lat,
+            delivery.delivery_lng
+          );
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          tracking_number: trackingNumber,
+          estimated_delivery_time: eta,
+          status: delivery.status,
+        },
+      });
+    } catch (error) {
+      logger.error("Get delivery ETA error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // USER METHODS
+  // ================================================================
 
   // Get delivery details
   static async getDelivery(req, res) {
@@ -201,7 +390,9 @@ class DeliveryController {
 
       // Real-time updates
       const socketManager = req.app.get("socketManager");
-      socketManager.broadcastDeliveryUpdate(updatedDelivery);
+      if (socketManager) {
+        socketManager.broadcastDeliveryUpdate(updatedDelivery);
+      }
 
       logger.info(`Delivery status updated: ${id} to ${value.status}`);
 
@@ -218,6 +409,64 @@ class DeliveryController {
       });
     }
   }
+
+  // Get delivery history for user
+  static async getUserDeliveryHistory(req, res) {
+    try {
+      const { page = 1, limit = 10, status } = req.query;
+
+      let deliveries;
+      if (req.user.role === "customer") {
+        deliveries = await Delivery.findByCustomer(
+          req.user.id,
+          parseInt(page),
+          parseInt(limit),
+          status
+        );
+      } else if (req.user.role === "driver") {
+        const driver = await Driver.findByUserId(req.user.id);
+        if (!driver) {
+          return res.status(404).json({
+            success: false,
+            message: "Driver profile not found",
+          });
+        }
+        deliveries = await Delivery.findByDriver(
+          driver.id,
+          parseInt(page),
+          parseInt(limit),
+          status
+        );
+      } else if (req.user.role === "restaurant") {
+        deliveries = await Delivery.findByRestaurant(
+          req.user.restaurant_id,
+          parseInt(page),
+          parseInt(limit),
+          status
+        );
+      } else {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      res.json({
+        success: true,
+        data: deliveries,
+      });
+    } catch (error) {
+      logger.error("Get user delivery history error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // DRIVER SPECIFIC METHODS
+  // ================================================================
 
   // Accept delivery (driver)
   static async acceptDelivery(req, res) {
@@ -265,7 +514,9 @@ class DeliveryController {
 
       // Real-time updates
       const socketManager = req.app.get("socketManager");
-      socketManager.broadcastDeliveryUpdate(assignedDelivery);
+      if (socketManager) {
+        socketManager.broadcastDeliveryUpdate(assignedDelivery);
+      }
 
       logger.info(`Delivery accepted: ${id} by driver: ${driver.id}`);
 
@@ -344,12 +595,13 @@ class DeliveryController {
     }
   }
 
-  // Get delivery by tracking number
-  static async trackDelivery(req, res) {
+  // Start delivery (driver picks up from restaurant)
+  static async pickupDelivery(req, res) {
     try {
-      const { trackingNumber } = req.params;
-      const delivery = await Delivery.findByTrackingNumber(trackingNumber);
+      const { id } = req.params;
+      const { latitude, longitude } = req.body;
 
+      const delivery = await Delivery.findById(id);
       if (!delivery) {
         return res.status(404).json({
           success: false,
@@ -357,37 +609,210 @@ class DeliveryController {
         });
       }
 
-      // Get driver location if assigned and in transit
-      let driverLocation = null;
-      if (
-        delivery.driver_id &&
-        ["assigned", "picked_up", "in_transit"].includes(delivery.status)
-      ) {
-        const driver = await Driver.findById(delivery.driver_id);
-        if (driver && driver.current_lat && driver.current_lng) {
-          driverLocation = {
-            lat: driver.current_lat,
-            lng: driver.current_lng,
-            last_updated: driver.last_location_update,
-          };
-        }
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver || delivery.driver_id !== driver.id) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
       }
+
+      if (delivery.status !== "assigned") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid delivery status for pickup",
+        });
+      }
+
+      // Update delivery status and driver location
+      const updatedDelivery = await Delivery.updateStatus(id, "picked_up", {
+        pickup_time: new Date(),
+        pickup_lat: latitude,
+        pickup_lng: longitude,
+      });
+
+      await Driver.updateLocation(driver.id, latitude, longitude);
+
+      // Send notifications
+      await this.sendStatusNotifications(updatedDelivery);
 
       res.json({
         success: true,
-        data: {
-          ...delivery,
-          driver_location: driverLocation,
-        },
+        message: "Delivery picked up successfully",
+        data: updatedDelivery,
       });
     } catch (error) {
-      logger.error("Track delivery error:", error);
+      logger.error("Pickup delivery error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",
       });
     }
   }
+
+  // Complete delivery (driver delivers to customer)
+  static async completeDelivery(req, res) {
+    try {
+      const { id } = req.params;
+      const { latitude, longitude, notes } = req.body;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver || delivery.driver_id !== driver.id) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      if (!["picked_up", "in_transit"].includes(delivery.status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid delivery status for completion",
+        });
+      }
+
+      // Update delivery status
+      const updatedDelivery = await Delivery.updateStatus(id, "delivered", {
+        delivered_time: new Date(),
+        delivered_lat: latitude,
+        delivered_lng: longitude,
+        delivery_notes: notes,
+      });
+
+      // Update driver
+      await Driver.updateAvailability(driver.id, true);
+      await Driver.updateLocation(driver.id, latitude, longitude);
+      await Driver.incrementDeliveries(driver.id, delivery.delivery_fee);
+
+      // Send notifications
+      await this.sendStatusNotifications(updatedDelivery);
+
+      res.json({
+        success: true,
+        message: "Delivery completed successfully",
+        data: updatedDelivery,
+      });
+    } catch (error) {
+      logger.error("Complete delivery error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Update driver location during delivery
+  static async updateDeliveryLocation(req, res) {
+    try {
+      const { id } = req.params;
+      const { latitude, longitude } = req.body;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver || delivery.driver_id !== driver.id) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      // Update driver location
+      await Driver.updateLocation(driver.id, latitude, longitude);
+
+      // Real-time location update
+      const socketManager = req.app.get("socketManager");
+      if (socketManager) {
+        socketManager.broadcastLocationUpdate(delivery.id, {
+          latitude,
+          longitude,
+          timestamp: new Date(),
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Location updated successfully",
+      });
+    } catch (error) {
+      logger.error("Update delivery location error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Report delivery issue
+  static async reportDeliveryIssue(req, res) {
+    try {
+      const { id } = req.params;
+      const { issue_type, description, severity } = req.body;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Check authorization
+      if (!this.canAccessDelivery(req.user, delivery)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      // Create issue report
+      const issue = await Delivery.createIssue(id, {
+        reporter_id: req.user.id,
+        reporter_type: req.user.role,
+        issue_type,
+        description,
+        severity: severity || "medium",
+      });
+
+      // Notify support team
+      await externalServices.sendNotification("support", {
+        type: "delivery_issue_reported",
+        delivery_id: id,
+        issue_id: issue.id,
+        severity,
+      });
+
+      res.json({
+        success: true,
+        message: "Issue reported successfully",
+        data: issue,
+      });
+    } catch (error) {
+      logger.error("Report delivery issue error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // QR CODE METHODS
+  // ================================================================
 
   // Validate QR code
   static async validateQRCode(req, res) {
@@ -436,7 +861,9 @@ class DeliveryController {
 
         // Real-time updates
         const socketManager = req.app.get("socketManager");
-        socketManager.broadcastDeliveryUpdate(updatedDelivery);
+        if (socketManager) {
+          socketManager.broadcastDeliveryUpdate(updatedDelivery);
+        }
       }
 
       res.json({
@@ -497,6 +924,51 @@ class DeliveryController {
       });
     }
   }
+
+  // Regenerate QR codes
+  static async regenerateQRCodes(req, res) {
+    try {
+      const { id } = req.params;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Check authorization (admin or restaurant)
+      if (
+        req.user.role !== "admin" &&
+        (req.user.role !== "restaurant" ||
+          req.user.restaurant_id !== delivery.restaurant_id)
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      const updatedDelivery = await Delivery.regenerateQRCodes(id);
+
+      res.json({
+        success: true,
+        message: "QR codes regenerated successfully",
+        data: updatedDelivery,
+      });
+    } catch (error) {
+      logger.error("Regenerate QR codes error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // RATING AND FEEDBACK METHODS
+  // ================================================================
 
   // Rate delivery
   static async rateDelivery(req, res) {
@@ -560,6 +1032,89 @@ class DeliveryController {
     }
   }
 
+  // Get delivery ratings
+  static async getDeliveryRatings(req, res) {
+    try {
+      const { id } = req.params;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Check authorization
+      if (!this.canAccessDelivery(req.user, delivery)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      const ratings = await Delivery.getRatings(id);
+
+      res.json({
+        success: true,
+        data: ratings,
+      });
+    } catch (error) {
+      logger.error("Get delivery ratings error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Add delivery feedback
+  static async addDeliveryFeedback(req, res) {
+    try {
+      const { id } = req.params;
+      const { feedback_type, message } = req.body;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Check authorization
+      if (!this.canAccessDelivery(req.user, delivery)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      const feedback = await Delivery.addFeedback(id, {
+        user_id: req.user.id,
+        user_type: req.user.role,
+        feedback_type,
+        message,
+      });
+
+      res.json({
+        success: true,
+        message: "Feedback added successfully",
+        data: feedback,
+      });
+    } catch (error) {
+      logger.error("Add delivery feedback error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // ANALYTICS AND STATISTICS METHODS
+  // ================================================================
+
   // Get delivery statistics
   static async getDeliveryStats(req, res) {
     try {
@@ -595,7 +1150,246 @@ class DeliveryController {
     }
   }
 
-  // Helper methods
+  // Get delivery performance metrics
+  static async getDeliveryPerformance(req, res) {
+    try {
+      const { timeframe = "week", restaurant_id, driver_id } = req.query;
+
+      const performance = await Delivery.getPerformanceMetrics({
+        timeframe,
+        restaurant_id,
+        driver_id,
+      });
+
+      res.json({
+        success: true,
+        data: performance,
+      });
+    } catch (error) {
+      logger.error("Get delivery performance error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Get driver performance
+  static async getDriverPerformance(req, res) {
+    try {
+      const { driverId } = req.params;
+      const { start_date, end_date } = req.query;
+
+      // Check authorization
+      if (req.user.role === "driver") {
+        const driver = await Driver.findByUserId(req.user.id);
+        if (!driver || driver.id !== driverId) {
+          return res.status(403).json({
+            success: false,
+            message: "Access denied",
+          });
+        }
+      }
+
+      const performance = await Driver.getPerformanceMetrics(
+        driverId,
+        start_date,
+        end_date
+      );
+
+      res.json({
+        success: true,
+        data: performance,
+      });
+    } catch (error) {
+      logger.error("Get driver performance error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // EMERGENCY AND SUPPORT METHODS
+  // ================================================================
+
+  // Emergency stop delivery
+  static async emergencyStopDelivery(req, res) {
+    try {
+      const { id } = req.params;
+      const { reason, contact_support } = req.body;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Check authorization
+      if (!this.canAccessDelivery(req.user, delivery)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      // Update delivery status to emergency
+      const updatedDelivery = await Delivery.updateStatus(id, "emergency", {
+        emergency_reason: reason,
+        emergency_by: req.user.id,
+        emergency_time: new Date(),
+      });
+
+      // Make driver available again if assigned
+      if (delivery.driver_id) {
+        await Driver.updateAvailability(delivery.driver_id, true);
+      }
+
+      // Notify all parties and support team
+      await externalServices.sendNotification("support", {
+        type: "delivery_emergency",
+        delivery_id: id,
+        reason,
+        contact_support,
+      });
+
+      await this.sendStatusNotifications(updatedDelivery);
+
+      res.json({
+        success: true,
+        message: "Emergency stop activated",
+        data: updatedDelivery,
+      });
+    } catch (error) {
+      logger.error("Emergency stop delivery error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Contact delivery participants
+  static async contactParticipant(req, res) {
+    try {
+      const { id } = req.params;
+      const { participant_type, message } = req.body;
+
+      if (!["customer", "driver", "restaurant"].includes(participant_type)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid participant type",
+        });
+      }
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Check authorization
+      if (!this.canAccessDelivery(req.user, delivery)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      // Send contact message through notification service
+      let targetUserId;
+      switch (participant_type) {
+        case "customer":
+          targetUserId = delivery.customer_id;
+          break;
+        case "driver":
+          if (delivery.driver_id) {
+            const driver = await Driver.findById(delivery.driver_id);
+            targetUserId = driver?.user_id;
+          }
+          break;
+        case "restaurant":
+          // Get restaurant owner/manager user ID
+          const restaurant = await externalServices.getRestaurant(
+            delivery.restaurant_id
+          );
+          targetUserId = restaurant?.owner_id;
+          break;
+      }
+
+      if (!targetUserId) {
+        return res.status(404).json({
+          success: false,
+          message: `${participant_type} not found or not available`,
+        });
+      }
+
+      await externalServices.sendNotification(targetUserId, {
+        type: "delivery_contact",
+        delivery_id: id,
+        from_user: req.user.id,
+        from_role: req.user.role,
+        message,
+      });
+
+      res.json({
+        success: true,
+        message: "Message sent successfully",
+      });
+    } catch (error) {
+      logger.error("Contact participant error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // Get delivery timeline
+  static async getDeliveryTimeline(req, res) {
+    try {
+      const { id } = req.params;
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({
+          success: false,
+          message: "Delivery not found",
+        });
+      }
+
+      // Check authorization
+      if (!this.canAccessDelivery(req.user, delivery)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied",
+        });
+      }
+
+      const timeline = await Delivery.getTimeline(id);
+
+      res.json({
+        success: true,
+        data: timeline,
+      });
+    } catch (error) {
+      logger.error("Get delivery timeline error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  // ================================================================
+  // HELPER METHODS
+  // ================================================================
+
   static async calculateDeliveryFee(
     pickupLat,
     pickupLng,
@@ -634,6 +1428,29 @@ class DeliveryController {
       estimatedTime.getMinutes() + baseMinutes + variableMinutes
     );
     return estimatedTime;
+  }
+
+  static async calculateRealTimeETA(currentLat, currentLng, destLat, destLng) {
+    // Calculate distance to destination
+    const R = 6371;
+    const dLat = ((destLat - currentLat) * Math.PI) / 180;
+    const dLng = ((destLng - currentLng) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((currentLat * Math.PI) / 180) *
+        Math.cos((destLat * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+
+    // Assume average speed of 30 km/h in city
+    const avgSpeed = 30;
+    const estimatedMinutes = (distance / avgSpeed) * 60;
+
+    const eta = new Date();
+    eta.setMinutes(eta.getMinutes() + Math.ceil(estimatedMinutes));
+    return eta;
   }
 
   // Authorization helpers

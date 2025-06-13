@@ -1,11 +1,10 @@
-
 const express = require("express");
 const DeliveryController = require("../controllers/deliveryController");
-const auth = require("../middleware/auth");
+const auth = require("../middleware/authMiddleware");
 const serviceAuth = require("../middleware/serviceAuth");
 const adminAuth = require("../middleware/adminAuth");
 const rateLimitMiddleware = require("../middleware/rateLimit");
-const validateLocation = require("../middleware/validateLocation");
+const  validateLocation = require("../middleware/validateLocation");
 const router = express.Router();
 
 // ================================================================
@@ -251,38 +250,3 @@ router.get(
 );
 
 module.exports = router;
-
-
-
-
-
-
-// ----------------------------------------------------------------
-// Main Route Registration (add to server.js)
-// ----------------------------------------------------------------
-
-/*
-// Add these route registrations to your delivery microservice server.js:
-
-// Main delivery routes
-app.use('/api/deliveries', deliveryRoutes);
-
-// Driver management routes
-app.use('/api/drivers', driverRoutes);
-
-// Real-time tracking routes
-app.use('/api/tracking', trackingRoutes);
-
-// Administrative routes
-app.use('/api/admin', adminRoutes);
-
-// Health check and status
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    service: 'Delivery Microservice',
-    timestamp: new Date().toISOString(),
-    realtime: 'Active'
-  });
-});
-*/

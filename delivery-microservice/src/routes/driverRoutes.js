@@ -1,7 +1,7 @@
 
 const express = require("express");
 const DriverController = require("../controllers/driverController");
-const auth = require("../middleware/auth");
+const auth = require("../middleware/authMiddleware");
 const adminAuth = require("../middleware/adminAuth");
 const rateLimitMiddleware = require("../middleware/rateLimit");
 const validateLocation = require("../middleware/validateLocation");
