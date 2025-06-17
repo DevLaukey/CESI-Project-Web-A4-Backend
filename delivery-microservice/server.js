@@ -11,9 +11,17 @@ const deliveryRoutes = require("./src/routes/deliveryRoutes");
 const adminRoutes = require("./src/routes/adminRoutes");
 const driverRoutes = require("./src/routes/driverRoutes");
 const trackingRoutes = require("./src/routes/trackingRoutes");
-const errorHandler = require("./src/middleware/errorHandler");
-const SocketManager = require("./src/services/socketManager");
+const {
+  errorHandler,
+  notFoundHandler,
+  asyncHandler,
+} = require("./src/middleware/errorHandler");
 const swaggerSetup = require("./src/config/swagger");
+
+// ADD THIS IMPORT - adjust path as needed
+const SocketManager = require("./src/utils/socketManager");
+// OR
+// const { SocketManager } = require("./src/utils/socketManager");
 
 const app = express();
 const server = http.createServer(app);
@@ -97,26 +105,14 @@ app.get("/api", (req, res) => {
   });
 });
 
-// Error handling middleware
-app.use(errorHandler);
+// REMOVE THE DUPLICATE 404 HANDLER - you have two!
+// Keep only one:
 
-// 404 handler
-app.use("*", (req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Not Found",
-    message: `Cannot ${req.method} ${req.originalUrl}`,
-    suggestion: "Check the API documentation at /api-docs",
-    availableRoutes: [
-      "/api/deliveries",
-      "/api/drivers",
-      "/api/tracking",
-      "/api/admin",
-      "/health",
-      "/api-docs",
-    ],
-  });
-});
+// 404 handler - MUST come after all routes
+app.use(notFoundHandler);
+
+// Error handler - MUST be the LAST middleware
+app.use(errorHandler);
 
 // Start server
 server.listen(PORT, async () => {

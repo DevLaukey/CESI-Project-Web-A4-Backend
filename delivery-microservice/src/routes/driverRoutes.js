@@ -1189,55 +1189,12 @@ router.get(
 router.put(
   "/vehicle",
   auth,
-  upload.array("vehicleDocuments", 5),
+  upload.vehicleDocuments,
   rateLimitMiddleware.userRate,
   DriverController.updateVehicleInfo
 );
 
-/**
- * @swagger
- * /api/drivers/vehicle/issue:
- *   post:
- *     summary: Report vehicle issue
- *     tags: [Driver - Registration]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - issue_type
- *               - description
- *             properties:
- *               issue_type:
- *                 type: string
- *                 enum: [mechanical, accident, maintenance, other]
- *               description:
- *                 type: string
- *               severity:
- *                 type: string
- *                 enum: [low, medium, high, critical]
- *                 default: medium
- *               location:
- *                 type: object
- *                 properties:
- *                   latitude:
- *                     type: number
- *                   longitude:
- *                     type: number
- *     responses:
- *       200:
- *         description: Vehicle issue reported successfully
- */
-router.post(
-  "/vehicle/issue",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.reportVehicleIssue
-);
+
 
 // ================================================================
 // NEARBY DRIVERS (ADMIN/SUPPORT ONLY)

@@ -1244,6 +1244,550 @@ class DriverController {
     }
   }
 
+  static async getDriverRating(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get rating data
+      const rating = await Driver.getRating(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver rating retrieved successfully",
+        data: rating,
+      });
+    } catch (error) {
+      logger.error("Error getting driver rating:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver rating",
+        error: "RATING_ERROR",
+      });
+    }
+  }
+
+  static async getDriverRatings(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get ratings data
+      const ratings = await Driver.getRatings(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver ratings retrieved successfully",
+        data: ratings,
+      });
+    } catch (error) {
+      logger.error("Error getting driver ratings:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver ratings",
+        error: "RATINGS_ERROR",
+      });
+    }
+  }
+
+  static async getReferralStats(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get referral stats
+      const referralStats = await Driver.getReferralStats(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver referral stats retrieved successfully",
+        data: referralStats,
+      });
+    } catch (error) {
+      logger.error("Error getting driver referral stats:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver referral stats",
+        error: "REFERRAL_STATS_ERROR",
+      });
+    }
+  }
+
+  static async generateReferralCode(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Generate referral code
+      const referralCode = await Driver.generateReferralCode(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver referral code generated successfully",
+        data: referralCode,
+      });
+    } catch (error) {
+      logger.error("Error generating driver referral code:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to generate driver referral code",
+        error: "REFERRAL_CODE_ERROR",
+      });
+    }
+  }
+
+  static async getNearbyDrivers(req, res) { 
+    try {
+      const { lat, lng, radius = 5 } = req.query;
+
+      if (!lat || !lng) {
+        return res.status(400).json({
+          success: false,
+          message: "Latitude and longitude are required",
+          error: "MISSING_COORDINATES",
+        });
+      }
+
+      // Get nearby drivers
+      const drivers = await Driver.getNearbyDrivers(lat, lng, radius);
+
+      res.json({
+        success: true,
+        message: "Nearby drivers retrieved successfully",
+        data: drivers,
+      });
+    } catch (error) {
+      logger.error("Error getting nearby drivers:", {
+        error: error.message,
+        stack: error.stack,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get nearby drivers",
+        error: "NEARBY_DRIVERS_ERROR",
+      });
+    }
+  }
+  static async updateVehicleInfo(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Validate vehicle info
+      const { make, model, year, licensePlate } = req.body;
+      if (!make || !model || !year || !licensePlate) {
+        return res.status(400).json({
+          success: false,
+          message: "All vehicle fields are required",
+          error: "VALIDATION_ERROR",
+        });
+      }
+
+      // Update vehicle info
+      await Driver.updateVehicleInfo(driver.id, {
+        make,
+        model,
+        year,
+        licensePlate,
+      });
+
+      res.json({
+        success: true,
+        message: "Driver vehicle info updated successfully",
+      });
+    } catch (error) {
+      logger.error("Error updating driver vehicle info:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to update driver vehicle info",
+        error: "VEHICLE_INFO_ERROR",
+      });
+    }
+  }
+  static async getVehicleInfo(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get vehicle info
+      const vehicleInfo = await Driver.getVehicleInfo(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver vehicle info retrieved successfully",
+        data: vehicleInfo,
+      });
+    } catch (error) {
+      logger.error("Error getting driver vehicle info:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver vehicle info",
+        error: "VEHICLE_INFO_ERROR",
+      });
+    }
+  }
+
+  static async getDriverReferralCode(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get referral code
+      const referralCode = await Driver.getReferralCode(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver referral code retrieved successfully",
+        data: referralCode,
+      });
+    } catch (error) {
+      logger.error("Error getting driver referral code:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver referral code",
+        error: "REFERRAL_CODE_ERROR",
+      });
+    }
+  }
+
+  static async getAllDrivers(req, res) {
+    try {
+      const drivers = await Driver.getAllDrivers();
+      res.json({
+        success: true,
+        message: "All drivers retrieved successfully",
+        data: drivers,
+      });
+    } catch (error) {
+      logger.error("Error getting all drivers:", {
+        error: error.message,
+        stack: error.stack,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get all drivers",
+        error: "ALL_DRIVERS_ERROR",
+      });
+    }
+  }
+
+  static async suspendDriver(req, res) { 
+    try {
+      const driverId = req.params.driverId;
+
+      // Validate input
+      if (!driverId) {
+        return res.status(400).json({
+          success: false,
+          message: "Driver ID is required",
+          error: "MISSING_DRIVER_ID",
+        });
+      }
+
+      // Get driver to verify existence
+      const driver = await Driver.findById(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Suspend driver
+      await Driver.suspend(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver suspended successfully",
+        data: { driverId: driver.id },
+      });
+    } catch (error) {
+      logger.error("Error suspending driver:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.params.driverId,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to suspend driver",
+        error: "SUSPEND_ERROR",
+      });
+    }
+  }
+
+  static async getDriverAdminDetails(req, res) { 
+    try {
+      const driverId = req.params.driverId;
+
+      // Validate input
+      if (!driverId) {
+        return res.status(400).json({
+          success: false,
+          message: "Driver ID is required",
+          error: "MISSING_DRIVER_ID",
+        });
+      }
+
+      // Get driver to verify existence
+      const driver = await Driver.findById(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get driver details
+      const driverDetails = await Driver.getAdminDetails(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver admin details retrieved successfully",
+        data: driverDetails,
+      });
+    } catch (error) {
+      logger.error("Error getting driver admin details:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.params.driverId,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver admin details",
+        error: "ADMIN_DETAILS_ERROR",
+      });
+    }
+    
+  }
+
+  static async verifyDriver(req, res) { 
+    try {
+      const driverId = req.params.driverId;
+      const { status, notes } = req.body;
+
+      // Validate input
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid verification status",
+          error: "INVALID_STATUS",
+        });
+      }
+
+      // Get driver to verify existence
+      const driver = await Driver.findById(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Update verification status
+      await Driver.updateVerificationStatus(driver.id, status, notes);
+
+      res.json({
+        success: true,
+        message: `Driver ${status} successfully`,
+        data: {
+          driverId: driver.id,
+          verificationStatus: status,
+          notes,
+        },
+      });
+    } catch (error) {
+      logger.error("Error verifying driver:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.params.driverId,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to verify driver",
+        error: "VERIFICATION_ERROR",
+      });
+    }
+  }
+
+  static async getDriverPerformance(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get performance data
+      const performance = await Driver.getPerformance(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver performance retrieved successfully",
+        data: performance,
+      });
+    } catch (error) {
+      logger.error("Error getting driver performance:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver performance",
+        error: "PERFORMANCE_ERROR",
+      });
+    }
+  }
+  static async getDriverEarnings(req, res) {
+    try {
+      const driverId = req.user.id;
+
+      // Get driver to verify existence
+      const driver = await Driver.findByUserId(driverId);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+          error: "DRIVER_NOT_FOUND",
+        });
+      }
+
+      // Get earnings data
+      const earnings = await Driver.getEarnings(driver.id);
+
+      res.json({
+        success: true,
+        message: "Driver earnings retrieved successfully",
+        data: earnings,
+      });
+    } catch (error) {
+      logger.error("Error getting driver earnings:", {
+        error: error.message,
+        stack: error.stack,
+        driverId: req.user.id,
+      });
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to get driver earnings",
+        error: "EARNINGS_ERROR",
+      });
+    }
+  }
+
   // ================================================================
   // HELPER METHODS
   // ================================================================
