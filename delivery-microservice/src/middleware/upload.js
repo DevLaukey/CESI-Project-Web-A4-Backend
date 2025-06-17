@@ -603,6 +603,80 @@ const getFileInfo = (filename, type = "delivery_photo") => {
   };
 };
 
+const driverRegistration = (req, res, next) => {
+  const upload = uploadDriverDocs.fields([
+    { name: "driverLicense", maxCount: 1 },
+    { name: "vehicleRegistration", maxCount: 1 },
+    { name: "insurance", maxCount: 1 },
+    { name: "profilePhoto", maxCount: 1 },
+  ]);
+
+  upload(req, res, (err) => {
+    if (err) {
+      return handleUploadError(err, res);
+    }
+
+    req.uploadedDocuments = {};
+
+    // Process each document type
+    if (req.files) {
+      Object.keys(req.files).forEach((fieldName) => {
+        req.uploadedDocuments[fieldName] = req.files[fieldName].map((file) => ({
+          ...file,
+          url: `/uploads/documents/${file.filename}`,
+          type: fieldName,
+          uploadedAt: new Date(),
+        }));
+      });
+
+      logger.info("Driver registration documents uploaded", {
+        documentTypes: Object.keys(req.uploadedDocuments),
+        totalFiles: Object.values(req.uploadedDocuments).flat().length,
+        userId: req.user?.id,
+      });
+    }
+
+    next();
+  });
+};
+
+
+
+/**
+ * Driver profile update documents upload
+ * Handles multiple document uploads for driver profile updates
+ */
+const driverProfileUpdate = (req, res, next) => {
+  const upload = uploadDriverDocs.array("documents", 10);
+
+  upload(req, res, (err) => {
+    if (err) {
+      return handleUploadError(err, res);
+    }
+
+    req.uploadedFiles = [];
+
+    // Process uploaded documents
+    if (req.files && req.files.length > 0) {
+      req.uploadedFiles = req.files.map((file) => ({
+        ...file,
+        url: `/uploads/documents/${file.filename}`,
+        type: "profile_document",
+        uploadedAt: new Date(),
+      }));
+
+      logger.info("Driver profile documents uploaded", {
+        count: req.files.length,
+        totalSize: req.files.reduce((sum, file) => sum + file.size, 0),
+        userId: req.user?.id,
+      });
+    }
+
+    next();
+  });
+};
+
+
 /**
  * Validate uploaded files
  */
@@ -623,6 +697,7 @@ module.exports = {
 
   // Driver and vehicle uploads
   driverDocuments,
+  driverRegistration,
   vehicleDocuments,
 
   // Utility functions
@@ -631,4 +706,5 @@ module.exports = {
   cleanupOldFiles,
   getFileInfo,
   uploadDir,
+  driverProfileUpdate
 };

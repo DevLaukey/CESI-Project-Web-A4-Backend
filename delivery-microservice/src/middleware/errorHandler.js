@@ -1,3 +1,4 @@
+// errorHandler.js
 const {
   ValidationError,
   UniqueConstraintError,
@@ -55,7 +56,7 @@ const errorHandler = (error, req, res, next) => {
     });
   }
 
-  // JWT errors (should be handled in auth middleware, but just in case)
+  // JWT errors
   if (error.name === "JsonWebTokenError") {
     return res.status(401).json({
       success: false,
@@ -116,7 +117,6 @@ const notFoundHandler = (req, res) => {
 
 /**
  * Async error wrapper
- * Wraps async route handlers to catch errors automatically
  */
 const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
