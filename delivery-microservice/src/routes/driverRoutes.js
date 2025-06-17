@@ -1,1096 +1,1481 @@
-const Driver = require("../models/Driver");
-const logger = require("../utils/logger");
-const externalServices = require("../services/externalServices");
-const {
-  validateDriverRegistration,
-  validateDriverUpdate,
-  validateLocationUpdate,
-  validateVehicleInfo,
-} = require("../validators/driverValidator");
+const express = require("express");
+const DriverController = require("../controllers/driverController");
+const auth = require("../middleware/authMiddleware");
+const adminAuth = require("../middleware/adminAuth");
+const rateLimitMiddleware = require("../middleware/rateLimit");
+const validateLocation = require("../middleware/validateLocation");
+const upload = require("../middleware/upload");
+const router = express.Router();
 
 /**
- * Driver Controller
- * Handles all driver-related operations
+ * @swagger
+ * tags:
+ *   - name: Driver - Registration
+ *     description: Driver registration and profile management
+ *   - name: Driver - Location
+ *     description: Driver location and availability management
+ *   - name: Driver - Deliveries
+ *     description: Driver delivery operations
+ *   - name: Driver - Analytics
+ *     description: Driver performance and earnings
+ *   - name: Driver - Admin
+ *     description: Administrative driver operations
  */
-class DriverController {
-  // ================================================================
-  // DRIVER REGISTRATION AND PROFILE
-  // ================================================================
-
-  /**
-   * Register as driver
-   */
-  static async registerDriver(req, res) {
-    try {
-      const { error, value } = validateDriverRegistration(req.body);
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message: "Validation error",
-          errors: error.details.map((detail) => detail.message),
-        });
-      }
-
-      // Check if user is already a driver
-      const existingDriver = await Driver.findByUserId(req.user.id);
-      if (existingDriver) {
-        return res.status(409).json({
-          success: false,
-          message: "User is already registered as a driver",
-        });
-      }
-
-      // Process uploaded documents
-      const documents = {};
-      if (req.uploadedDocuments) {
-        Object.keys(req.uploadedDocuments).forEach((docType) => {
-          documents[docType] = req.uploadedDocuments[docType].map((file) => ({
-            filename: file.filename,
-            url: file.url,
-            uploaded_at: new Date(),
-          }));
-        });
-      }
-
-      // Create driver profile
-      const driverData = {
-        ...value,
-        user_id: req.user.id,
-        documents,
-        is_verified: false,
-        is_available: false,
-        status: "pending_verification",
-      };
-
-      const driver = await Driver.create(driverData);
-
-      // Send notification to admin for verification
-      await externalServices.sendNotification("admin", {
-        type: "driver_registration",
-        driver_id: driver.id,
-        user_id: req.user.id,
-      });
-
-      logger.info(`Driver registration: ${driver.id} for user: ${req.user.id}`);
-
-      res.status(201).json({
-        success: true,
-        message: "Driver registration submitted successfully",
-        data: {
-          driver_id: driver.id,
-          status: driver.status,
-          verification_required: true,
-        },
-      });
-    } catch (error) {
-      logger.error("Driver registration error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver profile
-   */
-  static async getDriverProfile(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      res.json({
-        success: true,
-        data: driver,
-      });
-    } catch (error) {
-      logger.error("Get driver profile error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Update driver profile
-   */
-  static async updateDriverProfile(req, res) {
-    try {
-      const { error, value } = validateDriverUpdate(req.body);
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message: "Validation error",
-          errors: error.details.map((detail) => detail.message),
-        });
-      }
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      // Process new uploaded documents if any
-      const newDocuments = {};
-      if (req.uploadedDocuments) {
-        Object.keys(req.uploadedDocuments).forEach((docType) => {
-          newDocuments[docType] = req.uploadedDocuments[docType].map(
-            (file) => ({
-              filename: file.filename,
-              url: file.url,
-              uploaded_at: new Date(),
-            })
-          );
-        });
-      }
-
-      const updateData = {
-        ...value,
-        updated_at: new Date(),
-      };
-
-      if (Object.keys(newDocuments).length > 0) {
-        updateData.new_documents = newDocuments;
-      }
-
-      const updatedDriver = await Driver.update(driver.id, updateData);
-
-      logger.info(`Driver profile updated: ${driver.id}`);
-
-      res.json({
-        success: true,
-        message: "Driver profile updated successfully",
-        data: updatedDriver,
-      });
-    } catch (error) {
-      logger.error("Update driver profile error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Upload driver documents
-   */
-  static async uploadDriverDocuments(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      if (
-        !req.uploadedDocuments ||
-        Object.keys(req.uploadedDocuments).length === 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "No documents uploaded",
-        });
-      }
-
-      // Process uploaded documents
-      const documents = {};
-      Object.keys(req.uploadedDocuments).forEach((docType) => {
-        documents[docType] = req.uploadedDocuments[docType].map((file) => ({
-          filename: file.filename,
-          url: file.url,
-          uploaded_at: new Date(),
-        }));
-      });
-
-      await Driver.addDocuments(driver.id, documents);
-
-      logger.info(`Driver documents uploaded: ${driver.id}`);
-
-      res.json({
-        success: true,
-        message: "Documents uploaded successfully",
-        data: {
-          uploaded_documents: Object.keys(documents),
-          total_files: Object.values(documents).flat().length,
-        },
-      });
-    } catch (error) {
-      logger.error("Upload driver documents error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver verification status
-   */
-  static async getVerificationStatus(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const verificationStatus = await Driver.getVerificationStatus(driver.id);
-
-      res.json({
-        success: true,
-        data: verificationStatus,
-      });
-    } catch (error) {
-      logger.error("Get verification status error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // ================================================================
-  // LOCATION AND AVAILABILITY
-  // ================================================================
-
-  /**
-   * Update driver location
-   */
-  static async updateLocation(req, res) {
-    try {
-      const { latitude, longitude, heading, speed } = req.body;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      await Driver.updateLocation(driver.id, {
-        latitude,
-        longitude,
-        heading,
-        speed,
-        timestamp: new Date(),
-      });
-
-      res.json({
-        success: true,
-        message: "Location updated successfully",
-      });
-    } catch (error) {
-      logger.error("Update location error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Toggle driver availability
-   */
-  static async toggleAvailability(req, res) {
-    try {
-      const { available } = req.body;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      if (!driver.is_verified) {
-        return res.status(403).json({
-          success: false,
-          message: "Driver must be verified to toggle availability",
-        });
-      }
-
-      await Driver.updateAvailability(driver.id, available);
-
-      logger.info(
-        `Driver availability updated: ${driver.id} - ${
-          available ? "available" : "unavailable"
-        }`
-      );
-
-      res.json({
-        success: true,
-        message: `Driver is now ${available ? "available" : "unavailable"}`,
-        data: {
-          is_available: available,
-        },
-      });
-    } catch (error) {
-      logger.error("Toggle availability error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get nearby drivers (admin/support)
-   */
-  static async getNearbyDrivers(req, res) {
-    try {
-      const { latitude, longitude, radius = 10 } = req.query;
-
-      if (!latitude || !longitude) {
-        return res.status(400).json({
-          success: false,
-          message: "Latitude and longitude are required",
-        });
-      }
-
-      const drivers = await Driver.findNearbyDrivers(
-        parseFloat(latitude),
-        parseFloat(longitude),
-        parseFloat(radius)
-      );
-
-      res.json({
-        success: true,
-        data: {
-          drivers,
-          count: drivers.length,
-          radius: parseFloat(radius),
-        },
-      });
-    } catch (error) {
-      logger.error("Get nearby drivers error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Set driver work schedule
-   */
-  static async setDriverSchedule(req, res) {
-    try {
-      const { schedule } = req.body;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      await Driver.updateSchedule(driver.id, schedule);
-
-      res.json({
-        success: true,
-        message: "Work schedule updated successfully",
-        data: { schedule },
-      });
-    } catch (error) {
-      logger.error("Set driver schedule error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver work schedule
-   */
-  static async getDriverSchedule(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const schedule = await Driver.getSchedule(driver.id);
-
-      res.json({
-        success: true,
-        data: schedule,
-      });
-    } catch (error) {
-      logger.error("Get driver schedule error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // ================================================================
-  // DELIVERY MANAGEMENT
-  // ================================================================
-
-  /**
-   * Get available deliveries for driver
-   */
-  static async getAvailableDeliveries(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      if (!driver.is_verified || !driver.is_available) {
-        return res.status(403).json({
-          success: false,
-          message: "Driver must be verified and available",
-        });
-      }
-
-      const availableDeliveries = await Driver.getAvailableDeliveries(
-        driver.id
-      );
-
-      res.json({
-        success: true,
-        data: availableDeliveries,
-      });
-    } catch (error) {
-      logger.error("Get available deliveries error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get current delivery
-   */
-  static async getCurrentDelivery(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const currentDelivery = await Driver.getCurrentDelivery(driver.id);
-
-      res.json({
-        success: true,
-        data: currentDelivery,
-      });
-    } catch (error) {
-      logger.error("Get current delivery error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver deliveries history
-   */
-  static async getDriverDeliveries(req, res) {
-    try {
-      const { page = 1, limit = 10, status } = req.query;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const deliveries = await Driver.getDeliveryHistory(
-        driver.id,
-        parseInt(page),
-        parseInt(limit),
-        status
-      );
-
-      res.json({
-        success: true,
-        data: deliveries,
-      });
-    } catch (error) {
-      logger.error("Get driver deliveries error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get delivery route optimization
-   */
-  static async getOptimizedRoute(req, res) {
-    try {
-      const { deliveryId } = req.params;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const route = await Driver.getOptimizedRoute(driver.id, deliveryId);
-
-      res.json({
-        success: true,
-        data: route,
-      });
-    } catch (error) {
-      logger.error("Get optimized route error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // ================================================================
-  // EARNINGS AND STATISTICS
-  // ================================================================
-
-  /**
-   * Get driver statistics
-   */
-  static async getDriverStats(req, res) {
-    try {
-      const { timeframe = "week" } = req.query;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const stats = await Driver.getDriverStats(driver.id, timeframe);
-
-      res.json({
-        success: true,
-        data: stats,
-      });
-    } catch (error) {
-      logger.error("Get driver stats error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver earnings
-   */
-  static async getDriverEarnings(req, res) {
-    try {
-      const { start_date, end_date } = req.query;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const earnings = await Driver.getEarnings(
-        driver.id,
-        start_date,
-        end_date
-      );
-
-      res.json({
-        success: true,
-        data: earnings,
-      });
-    } catch (error) {
-      logger.error("Get driver earnings error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver performance metrics
-   */
-  static async getDriverPerformance(req, res) {
-    try {
-      const { timeframe = "month" } = req.query;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const performance = await Driver.getPerformanceMetrics(
-        driver.id,
-        timeframe
-      );
-
-      res.json({
-        success: true,
-        data: performance,
-      });
-    } catch (error) {
-      logger.error("Get driver performance error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver ratings and reviews
-   */
-  static async getDriverRatings(req, res) {
-    try {
-      const { page = 1, limit = 20 } = req.query;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const ratings = await Driver.getRatings(
-        driver.id,
-        parseInt(page),
-        parseInt(limit)
-      );
-
-      res.json({
-        success: true,
-        data: ratings,
-      });
-    } catch (error) {
-      logger.error("Get driver ratings error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // ================================================================
-  // REFERRAL SYSTEM
-  // ================================================================
-
-  /**
-   * Get driver referral code
-   */
-  static async getDriverReferralCode(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const referralCode = await Driver.getReferralCode(driver.id);
-
-      res.json({
-        success: true,
-        data: referralCode,
-      });
-    } catch (error) {
-      logger.error("Get driver referral code error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get referral statistics
-   */
-  static async getReferralStats(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const stats = await Driver.getReferralStats(driver.id);
-
-      res.json({
-        success: true,
-        data: stats,
-      });
-    } catch (error) {
-      logger.error("Get referral stats error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Generate new referral code
-   */
-  static async generateReferralCode(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const newCode = await Driver.generateNewReferralCode(driver.id);
-
-      res.json({
-        success: true,
-        message: "New referral code generated",
-        data: newCode,
-      });
-    } catch (error) {
-      logger.error("Generate referral code error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // ================================================================
-  // VEHICLE MANAGEMENT
-  // ================================================================
-
-  /**
-   * Update vehicle information
-   */
-  static async updateVehicleInfo(req, res) {
-    try {
-      const { error, value } = validateVehicleInfo(req.body);
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message: "Validation error",
-          errors: error.details.map((detail) => detail.message),
-        });
-      }
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      // Process uploaded vehicle documents
-      const documents = {};
-      if (req.uploadedDocuments) {
-        Object.keys(req.uploadedDocuments).forEach((docType) => {
-          documents[docType] = req.uploadedDocuments[docType].map((file) => ({
-            filename: file.filename,
-            url: file.url,
-            uploaded_at: new Date(),
-          }));
-        });
-      }
-
-      const vehicleData = {
-        ...value,
-        documents,
-        updated_at: new Date(),
-      };
-
-      await Driver.updateVehicleInfo(driver.id, vehicleData);
-
-      res.json({
-        success: true,
-        message: "Vehicle information updated successfully",
-      });
-    } catch (error) {
-      logger.error("Update vehicle info error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get vehicle information
-   */
-  static async getVehicleInfo(req, res) {
-    try {
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const vehicleInfo = await Driver.getVehicleInfo(driver.id);
-
-      res.json({
-        success: true,
-        data: vehicleInfo,
-      });
-    } catch (error) {
-      logger.error("Get vehicle info error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Report vehicle issue
-   */
-  static async reportVehicleIssue(req, res) {
-    try {
-      const { issue_type, description, severity } = req.body;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const issue = await Driver.reportVehicleIssue(driver.id, {
-        issue_type,
-        description,
-        severity: severity || "medium",
-        reported_at: new Date(),
-      });
-
-      // Notify support
-      await externalServices.sendNotification("support", {
-        type: "vehicle_issue_reported",
-        driver_id: driver.id,
-        issue_id: issue.id,
-        severity,
-      });
-
-      res.json({
-        success: true,
-        message: "Vehicle issue reported successfully",
-        data: issue,
-      });
-    } catch (error) {
-      logger.error("Report vehicle issue error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // ================================================================
-  // ADMIN ROUTES
-  // ================================================================
-
-  /**
-   * Get all drivers (admin)
-   */
-  static async getAllDrivers(req, res) {
-    try {
-      const { page = 1, limit = 20, status, verified } = req.query;
-
-      const drivers = await Driver.getAllDrivers({
-        page: parseInt(page),
-        limit: parseInt(limit),
-        status,
-        verified:
-          verified === "true" ? true : verified === "false" ? false : undefined,
-      });
-
-      res.json({
-        success: true,
-        data: drivers,
-      });
-    } catch (error) {
-      logger.error("Get all drivers error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Verify driver (admin)
-   */
-  static async verifyDriver(req, res) {
-    try {
-      const { id } = req.params;
-      const { verified, notes } = req.body;
-
-      const result = await Driver.updateVerificationStatus(id, verified, {
-        verified_by: req.user.id,
-        verification_notes: notes,
-        verified_at: new Date(),
-      });
-
-      if (!result) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver not found",
-        });
-      }
-
-      // Notify driver
-      const driver = await Driver.findById(id);
-      if (driver) {
-        await externalServices.sendNotification(driver.user_id, {
-          type: "verification_status_update",
-          verified,
-          notes,
-        });
-      }
-
-      logger.info(
-        `Driver verification updated: ${id} - ${
-          verified ? "verified" : "rejected"
-        }`
-      );
-
-      res.json({
-        success: true,
-        message: `Driver ${verified ? "verified" : "rejected"} successfully`,
-      });
-    } catch (error) {
-      logger.error("Verify driver error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Suspend driver (admin)
-   */
-  static async suspendDriver(req, res) {
-    try {
-      const { id } = req.params;
-      const { reason, duration } = req.body;
-
-      const result = await Driver.suspendDriver(id, {
-        reason,
-        duration,
-        suspended_by: req.user.id,
-        suspended_at: new Date(),
-      });
-
-      if (!result) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver not found",
-        });
-      }
-
-      // Notify driver
-      const driver = await Driver.findById(id);
-      if (driver) {
-        await externalServices.sendNotification(driver.user_id, {
-          type: "account_suspended",
-          reason,
-          duration,
-        });
-      }
-
-      logger.info(`Driver suspended: ${id} - ${reason}`);
-
-      res.json({
-        success: true,
-        message: "Driver suspended successfully",
-      });
-    } catch (error) {
-      logger.error("Suspend driver error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Get driver admin details
-   */
-  static async getDriverAdminDetails(req, res) {
-    try {
-      const { id } = req.params;
-
-      const driver = await Driver.getAdminDetails(id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver not found",
-        });
-      }
-
-      res.json({
-        success: true,
-        data: driver,
-      });
-    } catch (error) {
-      logger.error("Get driver admin details error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-}
-
-module.exports = DriverController;
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     DriverProfile:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         userId:
+ *           type: string
+ *         firstName:
+ *           type: string
+ *         lastName:
+ *           type: string
+ *         email:
+ *           type: string
+ *           format: email
+ *         phone:
+ *           type: string
+ *         licenseNumber:
+ *           type: string
+ *         vehicle:
+ *           type: object
+ *           properties:
+ *             type:
+ *               type: string
+ *             make:
+ *               type: string
+ *             model:
+ *               type: string
+ *             year:
+ *               type: integer
+ *             licensePlate:
+ *               type: string
+ *             color:
+ *               type: string
+ *         isVerified:
+ *           type: boolean
+ *         isAvailable:
+ *           type: boolean
+ *         status:
+ *           type: string
+ *           enum: [pending_verification, verified, suspended, rejected]
+ *         location:
+ *           type: object
+ *           properties:
+ *             latitude:
+ *               type: number
+ *             longitude:
+ *               type: number
+ *             lastUpdated:
+ *               type: string
+ *               format: date-time
+ *     DriverStats:
+ *       type: object
+ *       properties:
+ *         totalDeliveries:
+ *           type: integer
+ *         completedDeliveries:
+ *           type: integer
+ *         totalEarnings:
+ *           type: number
+ *         averageRating:
+ *           type: number
+ *         totalHours:
+ *           type: number
+ *         completionRate:
+ *           type: number
+ *     VehicleInfo:
+ *       type: object
+ *       properties:
+ *         type:
+ *           type: string
+ *           enum: [car, motorcycle, bicycle, truck]
+ *         make:
+ *           type: string
+ *         model:
+ *           type: string
+ *         year:
+ *           type: integer
+ *         licensePlate:
+ *           type: string
+ *         color:
+ *           type: string
+ *         documents:
+ *           type: object
+ *         lastInspection:
+ *           type: string
+ *           format: date
+ *         insuranceExpiry:
+ *           type: string
+ *           format: date
+ */
+
+// ================================================================
+// DRIVER REGISTRATION AND PROFILE
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/register:
+ *   post:
+ *     summary: Register as a driver
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - firstName
+ *               - lastName
+ *               - phone
+ *               - licenseNumber
+ *               - vehicleType
+ *               - vehicleMake
+ *               - vehicleModel
+ *               - vehicleYear
+ *               - licensePlate
+ *             properties:
+ *               firstName:
+ *                 type: string
+ *                 example: "John"
+ *               lastName:
+ *                 type: string
+ *                 example: "Doe"
+ *               phone:
+ *                 type: string
+ *                 example: "+1234567890"
+ *               licenseNumber:
+ *                 type: string
+ *                 example: "DL123456789"
+ *               vehicleType:
+ *                 type: string
+ *                 enum: [car, motorcycle, bicycle, truck]
+ *               vehicleMake:
+ *                 type: string
+ *                 example: "Toyota"
+ *               vehicleModel:
+ *                 type: string
+ *                 example: "Camry"
+ *               vehicleYear:
+ *                 type: integer
+ *                 example: 2020
+ *               licensePlate:
+ *                 type: string
+ *                 example: "ABC123"
+ *               vehicleColor:
+ *                 type: string
+ *                 example: "Blue"
+ *               emergencyContact:
+ *                 type: object
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                   phone:
+ *                     type: string
+ *                   relation:
+ *                     type: string
+ *               driverLicense:
+ *                 type: string
+ *                 format: binary
+ *                 description: Driver's license image
+ *               vehicleRegistration:
+ *                 type: string
+ *                 format: binary
+ *                 description: Vehicle registration document
+ *               insurance:
+ *                 type: string
+ *                 format: binary
+ *                 description: Insurance document
+ *               profilePhoto:
+ *                 type: string
+ *                 format: binary
+ *                 description: Driver's profile photo
+ *     responses:
+ *       201:
+ *         description: Driver registration submitted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     driverId:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                     verificationRequired:
+ *                       type: boolean
+ *       400:
+ *         description: Validation error
+ *       409:
+ *         description: User is already registered as a driver
+ */
+router.post(
+  "/register",
+  auth,
+  upload.driverRegistration,
+  rateLimitMiddleware.userRate,
+  DriverController.registerDriver
+);
+
+/**
+ * @swagger
+ * /api/drivers/profile:
+ *   get:
+ *     summary: Get driver profile
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Driver profile data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/DriverProfile'
+ *       404:
+ *         description: Driver profile not found
+ */
+router.get(
+  "/profile",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverProfile
+);
+
+/**
+ * @swagger
+ * /api/drivers/profile:
+ *   put:
+ *     summary: Update driver profile
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               emergencyContact:
+ *                 type: object
+ *               vehicleColor:
+ *                 type: string
+ *               newDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       200:
+ *         description: Profile updated successfully
+ *       404:
+ *         description: Driver profile not found
+ */
+router.put(
+  "/profile",
+  auth,
+  upload.driverProfileUpdate,
+  rateLimitMiddleware.userRate,
+  DriverController.updateDriverProfile
+);
+
+/**
+ * @swagger
+ * /api/drivers/documents:
+ *   post:
+ *     summary: Upload additional driver documents
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               documents:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       200:
+ *         description: Documents uploaded successfully
+ *       404:
+ *         description: Driver profile not found
+ */
+router.post(
+  "/documents",
+  auth,
+  upload.driverProfileUpdate,
+  rateLimitMiddleware.userRate,
+  DriverController.uploadDriverDocuments
+);
+
+/**
+ * @swagger
+ * /api/drivers/verification-status:
+ *   get:
+ *     summary: Get driver verification status
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Verification status details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     isVerified:
+ *                       type: boolean
+ *                     status:
+ *                       type: string
+ *                     documentsStatus:
+ *                       type: object
+ *                     verificationNotes:
+ *                       type: string
+ *                     lastUpdated:
+ *                       type: string
+ *                       format: date-time
+ */
+router.get(
+  "/verification-status",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getVerificationStatus
+);
+
+// ================================================================
+// LOCATION AND AVAILABILITY
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/location:
+ *   post:
+ *     summary: Update driver location
+ *     tags: [Driver - Location]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - latitude
+ *               - longitude
+ *             properties:
+ *               latitude:
+ *                 type: number
+ *                 example: 40.7128
+ *               longitude:
+ *                 type: number
+ *                 example: -74.0060
+ *               heading:
+ *                 type: number
+ *                 description: Direction in degrees (0-360)
+ *               speed:
+ *                 type: number
+ *                 description: Speed in km/h
+ *     responses:
+ *       200:
+ *         description: Location updated successfully
+ *       404:
+ *         description: Driver profile not found
+ */
+router.post(
+  "/location",
+  auth,
+  validateLocation,
+  rateLimitMiddleware.locationRate,
+  DriverController.updateLocation
+);
+
+/**
+ * @swagger
+ * /api/drivers/availability:
+ *   patch:
+ *     summary: Toggle driver availability
+ *     tags: [Driver - Location]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - available
+ *             properties:
+ *               available:
+ *                 type: boolean
+ *                 description: Set driver availability status
+ *     responses:
+ *       200:
+ *         description: Availability updated successfully
+ *       403:
+ *         description: Driver must be verified to toggle availability
+ *       404:
+ *         description: Driver profile not found
+ */
+router.patch(
+  "/availability",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.toggleAvailability
+);
+
+/**
+ * @swagger
+ * /api/drivers/schedule:
+ *   get:
+ *     summary: Get driver work schedule
+ *     tags: [Driver - Location]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Driver work schedule
+ *       404:
+ *         description: Driver profile not found
+ */
+router.get(
+  "/schedule",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverSchedule
+);
+
+/**
+ * @swagger
+ * /api/drivers/schedule:
+ *   post:
+ *     summary: Set driver work schedule
+ *     tags: [Driver - Location]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - schedule
+ *             properties:
+ *               schedule:
+ *                 type: object
+ *                 properties:
+ *                   monday:
+ *                     type: object
+ *                     properties:
+ *                       isWorking:
+ *                         type: boolean
+ *                       startTime:
+ *                         type: string
+ *                         format: time
+ *                       endTime:
+ *                         type: string
+ *                         format: time
+ *                   tuesday:
+ *                     type: object
+ *                     properties:
+ *                       isWorking:
+ *                         type: boolean
+ *                       startTime:
+ *                         type: string
+ *                         format: time
+ *                       endTime:
+ *                         type: string
+ *                         format: time
+ *                   wednesday:
+ *                     type: object
+ *                     properties:
+ *                       isWorking:
+ *                         type: boolean
+ *                       startTime:
+ *                         type: string
+ *                         format: time
+ *                       endTime:
+ *                         type: string
+ *                         format: time
+ *                   thursday:
+ *                     type: object
+ *                     properties:
+ *                       isWorking:
+ *                         type: boolean
+ *                       startTime:
+ *                         type: string
+ *                         format: time
+ *                       endTime:
+ *                         type: string
+ *                         format: time
+ *                   friday:
+ *                     type: object
+ *                     properties:
+ *                       isWorking:
+ *                         type: boolean
+ *                       startTime:
+ *                         type: string
+ *                         format: time
+ *                       endTime:
+ *                         type: string
+ *                         format: time
+ *                   saturday:
+ *                     type: object
+ *                     properties:
+ *                       isWorking:
+ *                         type: boolean
+ *                       startTime:
+ *                         type: string
+ *                         format: time
+ *                       endTime:
+ *                         type: string
+ *                         format: time
+ *                   sunday:
+ *                     type: object
+ *                     properties:
+ *                       isWorking:
+ *                         type: boolean
+ *                       startTime:
+ *                         type: string
+ *                         format: time
+ *                       endTime:
+ *                         type: string
+ *                         format: time
+ *     responses:
+ *       200:
+ *         description: Work schedule updated successfully
+ */
+router.post(
+  "/schedule",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.setDriverSchedule
+);
+
+// ================================================================
+// DELIVERY MANAGEMENT
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/deliveries/available:
+ *   get:
+ *     summary: Get available deliveries for driver
+ *     tags: [Driver - Deliveries]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of available deliveries
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Delivery'
+ *       403:
+ *         description: Driver must be verified and available
+ */
+router.get(
+  "/deliveries/available",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getAvailableDeliveries
+);
+
+/**
+ * @swagger
+ * /api/drivers/deliveries/current:
+ *   get:
+ *     summary: Get current active delivery
+ *     tags: [Driver - Deliveries]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current delivery details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/Delivery'
+ */
+router.get(
+  "/deliveries/current",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getCurrentDelivery
+);
+
+/**
+ * @swagger
+ * /api/drivers/deliveries/history:
+ *   get:
+ *     summary: Get driver delivery history
+ *     tags: [Driver - Deliveries]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [completed, cancelled]
+ *     responses:
+ *       200:
+ *         description: Delivery history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deliveries:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Delivery'
+ *                     pagination:
+ *                       type: object
+ */
+router.get(
+  "/deliveries/history",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverDeliveries
+);
+
+/**
+ * @swagger
+ * /api/drivers/deliveries/{deliveryId}/route:
+ *   get:
+ *     summary: Get optimized route for delivery
+ *     tags: [Driver - Deliveries]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deliveryId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Optimized route information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     route:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           lat:
+ *                             type: number
+ *                           lng:
+ *                             type: number
+ *                           instruction:
+ *                             type: string
+ *                     distance:
+ *                       type: number
+ *                       description: Total distance in kilometers
+ *                     estimatedTime:
+ *                       type: number
+ *                       description: Estimated time in minutes
+ *                     traffic:
+ *                       type: string
+ *                       enum: [light, moderate, heavy]
+ *       404:
+ *         description: Delivery not found or not assigned to driver
+ */
+router.get(
+  "/deliveries/:deliveryId/route",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getOptimizedRoute
+);
+
+// ================================================================
+// EARNINGS AND STATISTICS
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/stats:
+ *   get:
+ *     summary: Get driver statistics
+ *     tags: [Driver - Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: timeframe
+ *         schema:
+ *           type: string
+ *           enum: [day, week, month, quarter, year]
+ *           default: week
+ *         description: Time period for statistics
+ *     responses:
+ *       200:
+ *         description: Driver statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/DriverStats'
+ *       404:
+ *         description: Driver profile not found
+ */
+router.get(
+  "/stats",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverStats
+);
+
+/**
+ * @swagger
+ * /api/drivers/earnings:
+ *   get:
+ *     summary: Get driver earnings
+ *     tags: [Driver - Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: start_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date for earnings period
+ *       - in: query
+ *         name: end_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date for earnings period
+ *     responses:
+ *       200:
+ *         description: Driver earnings breakdown
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalEarnings:
+ *                       type: number
+ *                     baseEarnings:
+ *                       type: number
+ *                     tips:
+ *                       type: number
+ *                     bonuses:
+ *                       type: number
+ *                     deductions:
+ *                       type: number
+ *                     netEarnings:
+ *                       type: number
+ *                     earningsBreakdown:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           date:
+ *                             type: string
+ *                             format: date
+ *                           amount:
+ *                             type: number
+ *                           deliveries:
+ *                             type: integer
+ */
+router.get(
+  "/earnings",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverEarnings
+);
+
+/**
+ * @swagger
+ * /api/drivers/performance:
+ *   get:
+ *     summary: Get driver performance metrics
+ *     tags: [Driver - Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: timeframe
+ *         schema:
+ *           type: string
+ *           enum: [week, month, quarter, year]
+ *           default: month
+ *     responses:
+ *       200:
+ *         description: Performance metrics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     averageDeliveryTime:
+ *                       type: number
+ *                       description: Average delivery time in minutes
+ *                     onTimeDeliveryRate:
+ *                       type: number
+ *                       description: Percentage of on-time deliveries
+ *                     customerSatisfactionScore:
+ *                       type: number
+ *                     totalDistance:
+ *                       type: number
+ *                       description: Total distance covered in km
+ *                     fuelEfficiency:
+ *                       type: number
+ *                     rank:
+ *                       type: integer
+ *                       description: Rank among all drivers
+ */
+router.get(
+  "/performance",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverPerformance
+);
+
+/**
+ * @swagger
+ * /api/drivers/ratings:
+ *   get:
+ *     summary: Get driver ratings and reviews
+ *     tags: [Driver - Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Driver ratings and reviews
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     averageRating:
+ *                       type: number
+ *                     totalRatings:
+ *                       type: integer
+ *                     ratingDistribution:
+ *                       type: object
+ *                       properties:
+ *                         1:
+ *                           type: integer
+ *                         2:
+ *                           type: integer
+ *                         3:
+ *                           type: integer
+ *                         4:
+ *                           type: integer
+ *                         5:
+ *                           type: integer
+ *                     reviews:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           rating:
+ *                             type: integer
+ *                           comment:
+ *                             type: string
+ *                           deliveryId:
+ *                             type: string
+ *                           createdAt:
+ *                             type: string
+ *                             format: date-time
+ */
+router.get(
+  "/ratings",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverRatings
+);
+
+// ================================================================
+// REFERRAL SYSTEM
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/referral/code:
+ *   get:
+ *     summary: Get driver referral code
+ *     tags: [Driver - Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Driver referral code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     referralCode:
+ *                       type: string
+ *                     shareUrl:
+ *                       type: string
+ *                     qrCode:
+ *                       type: string
+ *                       description: Base64 encoded QR code image
+ */
+router.get(
+  "/referral/code",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getDriverReferralCode
+);
+
+/**
+ * @swagger
+ * /api/drivers/referral/stats:
+ *   get:
+ *     summary: Get referral statistics
+ *     tags: [Driver - Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Referral statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalReferrals:
+ *                       type: integer
+ *                     successfulReferrals:
+ *                       type: integer
+ *                     pendingReferrals:
+ *                       type: integer
+ *                     totalEarnings:
+ *                       type: number
+ *                     referralHistory:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ */
+router.get(
+  "/referral/stats",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getReferralStats
+);
+
+/**
+ * @swagger
+ * /api/drivers/referral/generate:
+ *   post:
+ *     summary: Generate new referral code
+ *     tags: [Driver - Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: New referral code generated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     referralCode:
+ *                       type: string
+ *                     shareUrl:
+ *                       type: string
+ */
+router.post(
+  "/referral/generate",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.generateReferralCode
+);
+
+// ================================================================
+// VEHICLE MANAGEMENT
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/vehicle:
+ *   get:
+ *     summary: Get vehicle information
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Vehicle information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/VehicleInfo'
+ */
+router.get(
+  "/vehicle",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.getVehicleInfo
+);
+
+/**
+ * @swagger
+ * /api/drivers/vehicle:
+ *   put:
+ *     summary: Update vehicle information
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               make:
+ *                 type: string
+ *               model:
+ *                 type: string
+ *               year:
+ *                 type: integer
+ *               color:
+ *                 type: string
+ *               licensePlate:
+ *                 type: string
+ *               insuranceExpiry:
+ *                 type: string
+ *                 format: date
+ *               registrationExpiry:
+ *                 type: string
+ *                 format: date
+ *               vehicleDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       200:
+ *         description: Vehicle information updated successfully
+ */
+router.put(
+  "/vehicle",
+  auth,
+  upload.array("vehicleDocuments", 5),
+  rateLimitMiddleware.userRate,
+  DriverController.updateVehicleInfo
+);
+
+/**
+ * @swagger
+ * /api/drivers/vehicle/issue:
+ *   post:
+ *     summary: Report vehicle issue
+ *     tags: [Driver - Registration]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - issue_type
+ *               - description
+ *             properties:
+ *               issue_type:
+ *                 type: string
+ *                 enum: [mechanical, accident, maintenance, other]
+ *               description:
+ *                 type: string
+ *               severity:
+ *                 type: string
+ *                 enum: [low, medium, high, critical]
+ *                 default: medium
+ *               location:
+ *                 type: object
+ *                 properties:
+ *                   latitude:
+ *                     type: number
+ *                   longitude:
+ *                     type: number
+ *     responses:
+ *       200:
+ *         description: Vehicle issue reported successfully
+ */
+router.post(
+  "/vehicle/issue",
+  auth,
+  rateLimitMiddleware.userRate,
+  DriverController.reportVehicleIssue
+);
+
+// ================================================================
+// NEARBY DRIVERS (ADMIN/SUPPORT ONLY)
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/nearby:
+ *   get:
+ *     summary: Get nearby drivers (admin/support only)
+ *     tags: [Driver - Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: latitude
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: longitude
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: radius
+ *         schema:
+ *           type: number
+ *           default: 10
+ *           description: Search radius in kilometers
+ *     responses:
+ *       200:
+ *         description: List of nearby drivers
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     drivers:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           location:
+ *                             type: object
+ *                           distance:
+ *                             type: number
+ *                           isAvailable:
+ *                             type: boolean
+ *                     count:
+ *                       type: integer
+ *                     radius:
+ *                       type: number
+ */
+router.get(
+  "/nearby",
+  auth,
+  adminAuth(["admin", "support"]),
+  rateLimitMiddleware.adminRate,
+  DriverController.getNearbyDrivers
+);
+
+// ================================================================
+// ADMIN ROUTES
+// ================================================================
+
+/**
+ * @swagger
+ * /api/drivers/admin/all:
+ *   get:
+ *     summary: Get all drivers (admin only)
+ *     tags: [Driver - Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [pending_verification, verified, suspended, rejected]
+ *       - in: query
+ *         name: verified
+ *         schema:
+ *           type: boolean
+ *     responses:
+ *       200:
+ *         description: List of all drivers
+ */
+router.get(
+  "/admin/all",
+  auth,
+  adminAuth(["admin", "support"]),
+  rateLimitMiddleware.adminRate,
+  DriverController.getAllDrivers
+);
+
+/**
+ * @swagger
+ * /api/drivers/admin/{id}/verify:
+ *   patch:
+ *     summary: Verify driver (admin only)
+ *     tags: [Driver - Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - verified
+ *             properties:
+ *               verified:
+ *                 type: boolean
+ *               notes:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Driver verification status updated
+ */
+router.patch(
+  "/admin/:id/verify",
+  auth,
+  adminAuth(["admin", "support"]),
+  rateLimitMiddleware.adminRate,
+  DriverController.verifyDriver
+);
+
+/**
+ * @swagger
+ * /api/drivers/admin/{id}/suspend:
+ *   patch:
+ *     summary: Suspend driver (admin only)
+ *     tags: [Driver - Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reason
+ *             properties:
+ *               reason:
+ *                 type: string
+ *               duration:
+ *                 type: integer
+ *                 description: Suspension duration in days
+ *     responses:
+ *       200:
+ *         description: Driver suspended successfully
+ */
+router.patch(
+  "/admin/:id/suspend",
+  auth,
+  adminAuth(["admin"]),
+  rateLimitMiddleware.adminRate,
+  DriverController.suspendDriver
+);
+
+/**
+ * @swagger
+ * /api/drivers/admin/{id}/details:
+ *   get:
+ *     summary: Get driver admin details (admin only)
+ *     tags: [Driver - Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Detailed driver information for admin
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     driver:
+ *                       $ref: '#/components/schemas/DriverProfile'
+ *                     stats:
+ *                       type: object
+ *                     verificationHistory:
+ *                       type: array
+ *                     documents:
+ *                       type: object
+ *                     issues:
+ *                       type: array
+ */
+router.get(
+  "/admin/:id/details",
+  auth,
+  adminAuth(["admin", "support"]),
+  rateLimitMiddleware.adminRate,
+  DriverController.getDriverAdminDetails
+);
+
+module.exports = router;

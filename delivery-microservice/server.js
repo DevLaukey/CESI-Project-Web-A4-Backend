@@ -8,11 +8,12 @@ const rateLimit = require("express-rate-limit");
 const logger = require("./src/utils/logger");
 const database = require("./src/config/database");
 const deliveryRoutes = require("./src/routes/deliveryRoutes");
-// const adminRoutes = require("./src/routes/adminRoutes");
+const adminRoutes = require("./src/routes/adminRoutes");
 const driverRoutes = require("./src/routes/driverRoutes");
 const trackingRoutes = require("./src/routes/trackingRoutes");
 const errorHandler = require("./src/middleware/errorHandler");
 const SocketManager = require("./src/services/socketManager");
+const swaggerSetup = require("./src/config/swagger");
 
 const app = express();
 const server = http.createServer(app);
@@ -30,6 +31,9 @@ const PORT = process.env.PORT || 3005;
 
 // Initialize Socket Manager
 const socketManager = new SocketManager(io);
+
+// Setup Swagger documentation BEFORE other middleware
+swaggerSetup(app);
 
 // Security middleware
 app.use(helmet());
@@ -65,23 +69,52 @@ app.get("/health", (req, res) => {
     service: "Delivery Microservice",
     timestamp: new Date().toISOString(),
     realtime: "Active",
+    version: process.env.npm_package_version || "1.0.0",
+    environment: process.env.NODE_ENV || "development",
+    swagger: `http://localhost:${PORT}/api-docs`,
   });
 });
 
-// Routes
+// API Routes
 app.use("/api/deliveries", deliveryRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/tracking", trackingRoutes);
-// app.use("/api/admin", adminRoutes);
+app.use("/api/admin", adminRoutes);
+
+// API info endpoint
+app.get("/api", (req, res) => {
+  res.json({
+    service: "Delivery Microservice API",
+    version: "1.0.0",
+    documentation: `http://localhost:${PORT}/api-docs`,
+    endpoints: {
+      deliveries: "/api/deliveries",
+      drivers: "/api/drivers",
+      tracking: "/api/tracking",
+      admin: "/api/admin",
+    },
+    health: "/health",
+  });
+});
 
 // Error handling middleware
-// app.use(errorHandler);
+app.use(errorHandler);
 
 // 404 handler
 app.use("*", (req, res) => {
   res.status(404).json({
     success: false,
-    message: "Route not found",
+    error: "Not Found",
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+    suggestion: "Check the API documentation at /api-docs",
+    availableRoutes: [
+      "/api/deliveries",
+      "/api/drivers",
+      "/api/tracking",
+      "/api/admin",
+      "/health",
+      "/api-docs",
+    ],
   });
 });
 
@@ -89,10 +122,31 @@ app.use("*", (req, res) => {
 server.listen(PORT, async () => {
   try {
     await database.testConnection();
-    logger.info(`Delivery Microservice running on port ${PORT}`);
-    logger.info("Real-time tracking is active");
+    logger.info(`🚀 Delivery Microservice running on port ${PORT}`);
+    logger.info(`📍 Environment: ${process.env.NODE_ENV || "development"}`);
+    logger.info(`📊 Health check: http://localhost:${PORT}/health`);
+    logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+    logger.info(`📡 Real-time tracking is active`);
+    logger.info(`🔍 API Explorer: http://localhost:${PORT}/api-docs.json`);
   } catch (error) {
     logger.error("Failed to start server:", error);
     process.exit(1);
   }
 });
+
+// Graceful shutdown
+process.on("SIGTERM", () => {
+  logger.info("SIGTERM received, shutting down gracefully");
+  server.close(() => {
+    logger.info("Process terminated");
+  });
+});
+
+process.on("SIGINT", () => {
+  logger.info("SIGINT received, shutting down gracefully");
+  server.close(() => {
+    logger.info("Process terminated");
+  });
+});
+
+module.exports = app;
