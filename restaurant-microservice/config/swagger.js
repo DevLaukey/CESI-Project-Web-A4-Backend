@@ -5,15 +5,27 @@ const options = {
   definition: {
     openapi: "3.0.0",
     info: {
-      title: "Restaurant Management Service API",
+      title: "Delivery Management Service API",
       version: "1.0.0",
       description:
-        "Comprehensive restaurant management service for handling restaurants, menus, items, reviews, and statistics",
+        "Comprehensive delivery management service API for handling deliveries, drivers, tracking, and administrative operations",
+      contact: {
+        name: "API Support",
+        email: "support@deliveryservice.com",
+      },
+      license: {
+        name: "MIT",
+        url: "https://opensource.org/licenses/MIT",
+      },
     },
     servers: [
       {
         url: `http://localhost:${process.env.PORT || 3000}`,
         description: "Development server",
+      },
+      {
+        url: `https://api.deliveryservice.com`,
+        description: "Production server",
       },
     ],
     components: {
@@ -22,28 +34,96 @@ const options = {
           type: "http",
           scheme: "bearer",
           bearerFormat: "JWT",
+          description: "JWT token for user authentication",
+        },
+        serviceAuth: {
+          type: "apiKey",
+          in: "header",
+          name: "X-Service-Key",
+          description: "Service-to-service authentication key",
         },
       },
       schemas: {
-        Restaurant: {
+        // Core Delivery Schema
+        Delivery: {
           type: "object",
           properties: {
-            uuid: {
+            id: {
               type: "string",
-              format: "uuid",
-              description: "Unique identifier for the restaurant",
+              description: "Unique delivery identifier",
+              example: "delivery_123456",
             },
-            name: {
+            orderId: {
               type: "string",
-              description: "Restaurant name",
+              description: "Associated order ID",
+              example: "order_789012",
             },
-            description: {
+            customerId: {
               type: "string",
-              description: "Restaurant description",
+              description: "Customer identifier",
+              example: "customer_345678",
             },
-            isActive: {
-              type: "boolean",
-              description: "Whether the restaurant is active",
+            restaurantId: {
+              type: "string",
+              description: "Restaurant identifier",
+              example: "restaurant_901234",
+            },
+            driverId: {
+              type: "string",
+              description: "Assigned driver identifier",
+              example: "driver_567890",
+            },
+            trackingNumber: {
+              type: "string",
+              description: "Public tracking number",
+              example: "TRK123456789",
+            },
+            status: {
+              type: "string",
+              enum: [
+                "pending",
+                "assigned",
+                "picked_up",
+                "in_transit",
+                "delivered",
+                "cancelled",
+              ],
+              description: "Current delivery status",
+            },
+            priority: {
+              type: "string",
+              enum: ["low", "normal", "high", "urgent"],
+              default: "normal",
+              description: "Delivery priority level",
+            },
+            pickupAddress: {
+              $ref: "#/components/schemas/Address",
+            },
+            deliveryAddress: {
+              $ref: "#/components/schemas/Address",
+            },
+            estimatedValue: {
+              type: "number",
+              description: "Estimated order value for insurance",
+              example: 25.99,
+            },
+            estimatedDeliveryTime: {
+              type: "string",
+              format: "date-time",
+              description: "Estimated delivery completion time",
+            },
+            actualDeliveryTime: {
+              type: "string",
+              format: "date-time",
+              description: "Actual delivery completion time",
+            },
+            specialInstructions: {
+              type: "string",
+              description: "Special handling instructions",
+              example: "Handle with care - fragile items",
+            },
+            proof: {
+              $ref: "#/components/schemas/DeliveryProof",
             },
             createdAt: {
               type: "string",
@@ -55,109 +135,416 @@ const options = {
             },
           },
         },
-        Menu: {
+
+        // Address Schema
+        Address: {
           type: "object",
+          required: ["street", "city", "latitude", "longitude"],
           properties: {
-            uuid: {
+            street: {
               type: "string",
-              format: "uuid",
-              description: "Unique identifier for the menu",
+              description: "Street address",
+              example: "123 Main Street",
             },
-            name: {
+            city: {
               type: "string",
-              description: "Menu name",
+              description: "City name",
+              example: "New York",
             },
-            description: {
+            state: {
               type: "string",
-              description: "Menu description",
+              description: "State or province",
+              example: "NY",
             },
-            isAvailable: {
-              type: "boolean",
-              description: "Whether the menu is available",
-            },
-            restaurantId: {
-              type: "integer",
-              description: "ID of the restaurant this menu belongs to",
-            },
-          },
-        },
-        Item: {
-          type: "object",
-          properties: {
-            uuid: {
+            zipCode: {
               type: "string",
-              format: "uuid",
-              description: "Unique identifier for the item",
+              description: "Postal code",
+              example: "10001",
             },
-            name: {
+            country: {
               type: "string",
-              description: "Item name",
+              description: "Country code",
+              example: "US",
+              default: "US",
             },
-            description: {
-              type: "string",
-              description: "Item description",
-            },
-            price: {
+            latitude: {
               type: "number",
-              format: "decimal",
-              description: "Item price",
+              description: "Latitude coordinate",
+              example: 40.7128,
+            },
+            longitude: {
+              type: "number",
+              description: "Longitude coordinate",
+              example: -74.006,
+            },
+            instructions: {
+              type: "string",
+              description: "Delivery instructions",
+              example: "Ring doorbell, leave at door",
+            },
+          },
+        },
+
+        // Driver Profile Schema
+        DriverProfile: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description: "Driver identifier",
+            },
+            userId: {
+              type: "string",
+              description: "Associated user account ID",
+            },
+            firstName: {
+              type: "string",
+              description: "Driver's first name",
+            },
+            lastName: {
+              type: "string",
+              description: "Driver's last name",
+            },
+            email: {
+              type: "string",
+              format: "email",
+              description: "Driver's email address",
+            },
+            phone: {
+              type: "string",
+              description: "Driver's phone number",
+            },
+            licenseNumber: {
+              type: "string",
+              description: "Driver's license number",
+            },
+            vehicle: {
+              $ref: "#/components/schemas/VehicleInfo",
+            },
+            isVerified: {
+              type: "boolean",
+              description: "Whether the driver is verified",
             },
             isAvailable: {
               type: "boolean",
-              description: "Whether the item is available",
+              description: "Whether the driver is currently available",
             },
-          },
-        },
-        Category: {
-          type: "object",
-          properties: {
-            uuid: {
+            status: {
               type: "string",
-              format: "uuid",
-              description: "Unique identifier for the category",
+              enum: [
+                "pending_verification",
+                "verified",
+                "suspended",
+                "rejected",
+              ],
+              description: "Driver status",
             },
-            name: {
-              type: "string",
-              description: "Category name",
-            },
-            sortOrder: {
-              type: "integer",
-              description: "Sort order for display",
-            },
-            isActive: {
-              type: "boolean",
-              description: "Whether the category is active",
-            },
-          },
-        },
-        Review: {
-          type: "object",
-          properties: {
-            uuid: {
-              type: "string",
-              format: "uuid",
-              description: "Unique identifier for the review",
+            location: {
+              $ref: "#/components/schemas/Location",
             },
             rating: {
-              type: "integer",
-              minimum: 1,
+              type: "number",
+              minimum: 0,
               maximum: 5,
-              description: "Rating from 1 to 5",
+              description: "Average driver rating",
             },
-            comment: {
-              type: "string",
-              description: "Review comment",
-            },
-            isVisible: {
-              type: "boolean",
-              description: "Whether the review is visible",
-            },
-            restaurantId: {
+            totalDeliveries: {
               type: "integer",
-              description: "ID of the restaurant being reviewed",
+              description: "Total number of completed deliveries",
+            },
+            createdAt: {
+              type: "string",
+              format: "date-time",
+            },
+            updatedAt: {
+              type: "string",
+              format: "date-time",
             },
           },
         },
+
+        // Vehicle Information Schema
+        VehicleInfo: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["car", "motorcycle", "bicycle", "truck"],
+              description: "Vehicle type",
+            },
+            make: {
+              type: "string",
+              description: "Vehicle manufacturer",
+              example: "Toyota",
+            },
+            model: {
+              type: "string",
+              description: "Vehicle model",
+              example: "Camry",
+            },
+            year: {
+              type: "integer",
+              description: "Vehicle year",
+              example: 2020,
+            },
+            licensePlate: {
+              type: "string",
+              description: "License plate number",
+              example: "ABC123",
+            },
+            color: {
+              type: "string",
+              description: "Vehicle color",
+              example: "Blue",
+            },
+            documents: {
+              type: "object",
+              description: "Vehicle documents and their verification status",
+            },
+            lastInspection: {
+              type: "string",
+              format: "date",
+              description: "Last inspection date",
+            },
+            insuranceExpiry: {
+              type: "string",
+              format: "date",
+              description: "Insurance expiry date",
+            },
+          },
+        },
+
+        // Location Schema
+        Location: {
+          type: "object",
+          required: ["latitude", "longitude"],
+          properties: {
+            latitude: {
+              type: "number",
+              description: "Latitude coordinate",
+              example: 40.7128,
+            },
+            longitude: {
+              type: "number",
+              description: "Longitude coordinate",
+              example: -74.006,
+            },
+            heading: {
+              type: "number",
+              minimum: 0,
+              maximum: 360,
+              description: "Direction in degrees",
+            },
+            speed: {
+              type: "number",
+              minimum: 0,
+              description: "Speed in km/h",
+            },
+            accuracy: {
+              type: "number",
+              description: "GPS accuracy in meters",
+            },
+            lastUpdated: {
+              type: "string",
+              format: "date-time",
+              description: "Last location update timestamp",
+            },
+          },
+        },
+
+        // Delivery Proof Schema
+        DeliveryProof: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["photo", "signature", "qr_code", "pin"],
+              description: "Type of proof provided",
+            },
+            data: {
+              type: "string",
+              description: "Base64 encoded proof data or PIN",
+            },
+            location: {
+              $ref: "#/components/schemas/Location",
+            },
+            timestamp: {
+              type: "string",
+              format: "date-time",
+              description: "When the proof was captured",
+            },
+          },
+        },
+
+        // Tracking Information Schema
+        TrackingInfo: {
+          type: "object",
+          properties: {
+            trackingNumber: {
+              type: "string",
+              description: "Unique tracking number",
+            },
+            status: {
+              type: "string",
+              enum: [
+                "pending",
+                "assigned",
+                "picked_up",
+                "in_transit",
+                "delivered",
+                "cancelled",
+              ],
+            },
+            currentLocation: {
+              $ref: "#/components/schemas/Location",
+            },
+            estimatedDeliveryTime: {
+              type: "string",
+              format: "date-time",
+            },
+            timeline: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/DeliveryMilestone",
+              },
+            },
+            driver: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                },
+                phone: {
+                  type: "string",
+                },
+                vehicle: {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                    },
+                    licensePlate: {
+                      type: "string",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        // Delivery Milestone Schema
+        DeliveryMilestone: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              description: "Milestone status",
+            },
+            timestamp: {
+              type: "string",
+              format: "date-time",
+            },
+            location: {
+              $ref: "#/components/schemas/Location",
+            },
+            notes: {
+              type: "string",
+              description: "Additional notes about the milestone",
+            },
+            updatedBy: {
+              type: "string",
+              description: "Who updated this milestone",
+            },
+          },
+        },
+
+        // Statistics Schemas
+        DriverStats: {
+          type: "object",
+          properties: {
+            totalDeliveries: {
+              type: "integer",
+              description: "Total number of deliveries",
+            },
+            completedDeliveries: {
+              type: "integer",
+              description: "Number of completed deliveries",
+            },
+            totalEarnings: {
+              type: "number",
+              description: "Total earnings",
+            },
+            averageRating: {
+              type: "number",
+              minimum: 0,
+              maximum: 5,
+              description: "Average customer rating",
+            },
+            totalHours: {
+              type: "number",
+              description: "Total hours worked",
+            },
+            completionRate: {
+              type: "number",
+              minimum: 0,
+              maximum: 100,
+              description: "Delivery completion rate as percentage",
+            },
+            onTimeDeliveryRate: {
+              type: "number",
+              minimum: 0,
+              maximum: 100,
+              description: "On-time delivery rate as percentage",
+            },
+          },
+        },
+
+        SystemOverview: {
+          type: "object",
+          properties: {
+            totalDeliveries: {
+              type: "integer",
+              description: "Total number of deliveries in the system",
+            },
+            activeDeliveries: {
+              type: "integer",
+              description: "Number of currently active deliveries",
+            },
+            totalDrivers: {
+              type: "integer",
+              description: "Total number of registered drivers",
+            },
+            activeDrivers: {
+              type: "integer",
+              description: "Number of currently active drivers",
+            },
+            systemHealth: {
+              type: "string",
+              enum: ["healthy", "degraded", "critical"],
+              description: "Overall system health status",
+            },
+            averageDeliveryTime: {
+              type: "number",
+              description: "Average delivery time in minutes",
+            },
+            performanceMetrics: {
+              type: "object",
+              properties: {
+                successRate: {
+                  type: "number",
+                  description: "Overall delivery success rate",
+                },
+                customerSatisfaction: {
+                  type: "number",
+                  description: "Average customer satisfaction score",
+                },
+              },
+            },
+          },
+        },
+
+        // Common Response Schemas
         ApiResponse: {
           type: "object",
           properties: {
@@ -173,8 +560,14 @@ const options = {
               type: "object",
               description: "Response data",
             },
+            timestamp: {
+              type: "string",
+              format: "date-time",
+              description: "Response timestamp",
+            },
           },
         },
+
         PaginationResponse: {
           type: "object",
           properties: {
@@ -190,254 +583,280 @@ const options = {
             pagination: {
               type: "object",
               properties: {
-                currentPage: {
+                page: {
                   type: "integer",
+                  description: "Current page number",
                 },
-                totalPages: {
+                limit: {
                   type: "integer",
+                  description: "Number of items per page",
                 },
-                totalCount: {
+                total: {
                   type: "integer",
+                  description: "Total number of items",
+                },
+                pages: {
+                  type: "integer",
+                  description: "Total number of pages",
+                },
+              },
+            },
+          },
+        },
+
+        Error: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: false,
+            },
+            error: {
+              type: "string",
+              description: "Error message",
+            },
+            code: {
+              type: "string",
+              description: "Error code",
+            },
+            details: {
+              type: "object",
+              description: "Additional error details",
+            },
+            timestamp: {
+              type: "string",
+              format: "date-time",
+            },
+          },
+        },
+
+        ValidationError: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: false,
+            },
+            error: {
+              type: "string",
+              example: "Validation failed",
+            },
+            details: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  field: {
+                    type: "string",
+                    description: "Field that failed validation",
+                  },
+                  message: {
+                    type: "string",
+                    description: "Validation error message",
+                  },
                 },
               },
             },
           },
         },
       },
+
+      responses: {
+        UnauthorizedError: {
+          description: "Unauthorized - Invalid or missing authentication",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/Error",
+              },
+            },
+          },
+        },
+        ForbiddenError: {
+          description: "Forbidden - Insufficient permissions",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/Error",
+              },
+            },
+          },
+        },
+        NotFoundError: {
+          description: "Resource not found",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/Error",
+              },
+            },
+          },
+        },
+        ValidationError: {
+          description: "Validation error",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/ValidationError",
+              },
+            },
+          },
+        },
+        InternalServerError: {
+          description: "Internal server error",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/Error",
+              },
+            },
+          },
+        },
+      },
+
+      parameters: {
+        DeliveryId: {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "Delivery identifier",
+          schema: {
+            type: "string",
+          },
+        },
+        DriverId: {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "Driver identifier",
+          schema: {
+            type: "string",
+          },
+        },
+        TrackingNumber: {
+          name: "trackingNumber",
+          in: "path",
+          required: true,
+          description: "Delivery tracking number",
+          schema: {
+            type: "string",
+          },
+        },
+        PageParam: {
+          name: "page",
+          in: "query",
+          description: "Page number for pagination",
+          schema: {
+            type: "integer",
+            minimum: 1,
+            default: 1,
+          },
+        },
+        LimitParam: {
+          name: "limit",
+          in: "query",
+          description: "Number of items per page",
+          schema: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            default: 10,
+          },
+        },
+      },
     },
+
     tags: [
       {
-        name: "Restaurants",
-        description: "Restaurant management operations",
+        name: "Admin - System",
+        description: "System overview and health monitoring",
       },
       {
-        name: "Menus",
-        description: "Menu management operations",
+        name: "Admin - Deliveries",
+        description: "Administrative delivery management",
       },
       {
-        name: "Items",
-        description: "Menu item management operations",
+        name: "Admin - Drivers",
+        description: "Driver management and approval",
       },
       {
-        name: "Categories",
-        description: "Category management operations",
+        name: "Admin - Analytics",
+        description: "Analytics and reporting",
       },
       {
-        name: "Reviews",
-        description: "Review management operations",
+        name: "Admin - Configuration",
+        description: "System configuration management",
       },
       {
-        name: "Statistics",
-        description: "Statistics and analytics operations",
+        name: "Delivery - Service",
+        description: "Service-to-service delivery operations (internal API)",
       },
       {
-        name: "Service",
-        description: "Service information and health checks",
+        name: "Delivery - Public",
+        description: "Public delivery tracking and information",
+      },
+      {
+        name: "Delivery - User",
+        description: "User delivery operations (customer/restaurant access)",
+      },
+      {
+        name: "Delivery - Driver",
+        description: "Driver-specific delivery operations",
+      },
+      {
+        name: "Delivery - QR Code",
+        description: "QR code validation and generation",
+      },
+      {
+        name: "Delivery - Feedback",
+        description: "Rating and feedback system",
+      },
+      {
+        name: "Delivery - Analytics",
+        description: "Statistics and performance metrics",
+      },
+      {
+        name: "Delivery - Emergency",
+        description: "Emergency and support operations",
+      },
+      {
+        name: "Driver - Registration",
+        description: "Driver registration and profile management",
+      },
+      {
+        name: "Driver - Location",
+        description: "Driver location and availability management",
+      },
+      {
+        name: "Driver - Deliveries",
+        description: "Driver delivery operations",
+      },
+      {
+        name: "Driver - Analytics",
+        description: "Driver performance and earnings",
+      },
+      {
+        name: "Driver - Admin",
+        description: "Administrative driver operations",
+      },
+      {
+        name: "Tracking",
+        description: "Delivery tracking and real-time updates",
+      },
+      {
+        name: "Health",
+        description: "System health and status endpoints",
       },
     ],
-    paths: {
-      "/api/info": {
-        get: {
-          tags: ["Service"],
-          summary: "Get service information",
-          description:
-            "Returns basic information about the Restaurant Management Service",
-          responses: {
-            200: {
-              description: "Service information retrieved successfully",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      success: { type: "boolean" },
-                      service: { type: "string" },
-                      version: { type: "string" },
-                      endpoints: { type: "object" },
-                      timestamp: { type: "string", format: "date-time" },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      "/api/restaurants/search": {
-        get: {
-          tags: ["Restaurants"],
-          summary: "Search restaurants",
-          description: "Search for restaurants based on query parameters",
-          parameters: [
-            {
-              name: "q",
-              in: "query",
-              description: "Search query",
-              required: false,
-              schema: { type: "string" },
-            },
-            {
-              name: "page",
-              in: "query",
-              description: "Page number",
-              required: false,
-              schema: { type: "integer", default: 1 },
-            },
-            {
-              name: "limit",
-              in: "query",
-              description: "Number of results per page",
-              required: false,
-              schema: { type: "integer", default: 10 },
-            },
-          ],
-          responses: {
-            200: {
-              description: "Restaurants found",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/PaginationResponse" },
-                },
-              },
-            },
-          },
-        },
-      },
-      "/api/restaurants/popular": {
-        get: {
-          tags: ["Restaurants"],
-          summary: "Get popular restaurants",
-          description: "Retrieve a list of popular restaurants",
-          responses: {
-            200: {
-              description: "Popular restaurants retrieved successfully",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/ApiResponse" },
-                },
-              },
-            },
-          },
-        },
-      },
-      "/api/restaurants/{uuid}": {
-        get: {
-          tags: ["Restaurants"],
-          summary: "Get restaurant by UUID",
-          description: "Retrieve a specific restaurant by its UUID",
-          parameters: [
-            {
-              name: "uuid",
-              in: "path",
-              required: true,
-              description: "Restaurant UUID",
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
-          responses: {
-            200: {
-              description: "Restaurant found",
-              content: {
-                "application/json": {
-                  schema: {
-                    allOf: [
-                      { $ref: "#/components/schemas/ApiResponse" },
-                      {
-                        type: "object",
-                        properties: {
-                          data: { $ref: "#/components/schemas/Restaurant" },
-                        },
-                      },
-                    ],
-                  },
-                },
-              },
-            },
-            404: {
-              description: "Restaurant not found",
-            },
-          },
-        },
-      },
-      "/api/categories": {
-        get: {
-          tags: ["Categories"],
-          summary: "Get all categories",
-          description: "Retrieve all active categories",
-          responses: {
-            200: {
-              description: "Categories retrieved successfully",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      success: { type: "boolean" },
-                      categories: {
-                        type: "array",
-                        items: { $ref: "#/components/schemas/Category" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      "/api/reviews/restaurant/{restaurantUuid}": {
-        get: {
-          tags: ["Reviews"],
-          summary: "Get restaurant reviews",
-          description: "Retrieve reviews for a specific restaurant",
-          parameters: [
-            {
-              name: "restaurantUuid",
-              in: "path",
-              required: true,
-              description: "Restaurant UUID",
-              schema: { type: "string", format: "uuid" },
-            },
-            {
-              name: "page",
-              in: "query",
-              description: "Page number",
-              required: false,
-              schema: { type: "integer", default: 1 },
-            },
-            {
-              name: "limit",
-              in: "query",
-              description: "Number of reviews per page",
-              required: false,
-              schema: { type: "integer", default: 10 },
-            },
-            {
-              name: "rating",
-              in: "query",
-              description: "Filter by rating",
-              required: false,
-              schema: { type: "integer", minimum: 1, maximum: 5 },
-            },
-          ],
-          responses: {
-            200: {
-              description: "Reviews retrieved successfully",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/PaginationResponse" },
-                },
-              },
-            },
-            404: {
-              description: "Restaurant not found",
-            },
-          },
-        },
-      },
-    },
   },
-  apis: ["./routes/*.js", "./routes/index.js"],
+  apis: [
+    "./routes/*.js",
+    "./routes/adminRoutes.js",
+    "./routes/deliveryRoutes.js",
+    "./routes/driverRoutes.js",
+    "./routes/trackingRoutes.js",
+    "./routes/index.js",
+  ],
 };
 
 const specs = swaggerJsdoc(options);
@@ -448,14 +867,51 @@ module.exports = (app) => {
     swaggerUi.serve,
     swaggerUi.setup(specs, {
       explorer: true,
-      customCss: ".swagger-ui .topbar { display: none }",
-      customSiteTitle: "Restaurant Management API Documentation",
+      customCss: `
+        .swagger-ui .topbar { display: none }
+        .swagger-ui .info { margin: 50px 0; }
+        .swagger-ui .info .title { color: #3b4151; }
+        .swagger-ui .scheme-container { background: #fafafa; padding: 20px; margin: 20px 0; }
+      `,
+      customSiteTitle: "Delivery Management API Documentation",
+      customfavIcon: "/favicon.ico",
+      customJs: [
+        "https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-bundle.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-standalone-preset.min.js",
+      ],
+      swaggerOptions: {
+        persistAuthorization: true,
+        displayRequestDuration: true,
+        docExpansion: "none",
+        filter: true,
+        showExtensions: true,
+        showCommonExtensions: true,
+        tryItOutEnabled: true,
+      },
     })
   );
 
-  // Also provide JSON endpoint for the spec
+  // Provide JSON endpoint for the spec
   app.get("/api-docs.json", (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.send(specs);
+  });
+
+  // Provide YAML endpoint for the spec
+  app.get("/api-docs.yaml", (req, res) => {
+    res.setHeader("Content-Type", "application/x-yaml");
+    const yaml = require("js-yaml");
+    res.send(yaml.dump(specs));
+  });
+
+  // Health check for documentation
+  app.get("/api-docs/health", (req, res) => {
+    res.json({
+      status: "healthy",
+      documentation: "available",
+      endpoints: Object.keys(specs.paths || {}).length,
+      schemas: Object.keys(specs.components?.schemas || {}).length,
+      timestamp: new Date().toISOString(),
+    });
   });
 };
