@@ -5,6 +5,7 @@ const {
   Category,
   RestaurantStats,
   Review,
+  sequelize,
 } = require("../models");
 const { Op } = require("sequelize");
 const {

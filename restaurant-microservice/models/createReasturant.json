@@ -1,0 +1,28 @@
+{
+  "name": "La Belle Cuisine",
+  "description": "A fine dining restaurant specializing in French cuisine",
+  "cuisineType": "French",
+  "phone": "+33123456789",
+  "email": "contact@labellecuisine.com",
+  "address": "123 Rue de la Paix",
+  "city": "Paris",
+  "postalCode": "75002",
+  "country": "France",
+  "latitude": 48.8698,
+  "longitude": 2.3319,
+  "deliveryFee": 5.99,
+  "minimumOrder": 15.0,
+  "averageDeliveryTime": 30,
+  "openingHours": {
+    "1": { "open": 1100, "close": 2200 },
+    "2": { "open": 1100, "close": 2200 },
+    "3": { "open": 1100, "close": 2200 },
+    "4": { "open": 1100, "close": 2300 },
+    "5": { "open": 1100, "close": 2300 },
+    "6": { "open": 1000, "close": 2300 },
+    "0": { "open": 1000, "close": 2100 }
+  },
+
+  "tags": ["fine-dining", "french-cuisine", "paris-restaurant"],
+  "businessLicense": "LICENSE123456"
+}
