@@ -23,15 +23,12 @@ const restaurantValidation = Joi.object({
   }),
   address: Joi.string().max(500).required().messages({
     "string.max": "Address cannot exceed 500 characters",
-    "any.required": "Address is required",
   }),
   city: Joi.string().max(100).required().messages({
     "string.max": "City name cannot exceed 100 characters",
-    "any.required": "City is required",
   }),
   postalCode: Joi.string().max(20).required().messages({
     "string.max": "Postal code cannot exceed 20 characters",
-    "any.required": "Postal code is required",
   }),
   country: Joi.string().max(100).default("France").optional(),
   latitude: Joi.number().min(-90).max(90).optional().messages({
@@ -114,14 +111,7 @@ const restaurantValidation = Joi.object({
       "array.max": "Cannot have more than 10 tags",
     }),
   businessLicense: Joi.string().max(100).optional(),
-  settings: Joi.object({
-    acceptsOnlineOrders: Joi.boolean().default(true),
-    acceptsCashOnDelivery: Joi.boolean().default(true),
-    acceptsCardPayment: Joi.boolean().default(true),
-    autoAcceptOrders: Joi.boolean().default(false),
-    preparationBuffer: Joi.number().min(0).max(60).default(5),
-    maxOrdersPerHour: Joi.number().min(1).max(100).default(20),
-  }).optional(),
+
 });
 
 const updateRestaurantValidation = Joi.object({

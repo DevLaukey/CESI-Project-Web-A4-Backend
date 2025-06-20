@@ -147,6 +147,7 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
+  // Define associations
   Restaurant.associate = function (models) {
     Restaurant.hasMany(models.Item, {
       foreignKey: "restaurantId",
@@ -165,7 +166,7 @@ module.exports = (sequelize, DataTypes) => {
       as: "reviews",
     });
     Restaurant.belongsToMany(models.Category, {
-      through: "RestaurantCategories",
+      through: models.RestaurantCategories, // Fixed: use the actual model
       foreignKey: "restaurantId",
       otherKey: "categoryId",
       as: "categories",

@@ -2,7 +2,9 @@ const express = require("express");
 const helmet = require("helmet");
 require("dotenv").config();
 
+// Import sequelize and models
 const { sequelize } = require("./models");
+
 const routes = require("./routes");
 const {
   errorHandler,
@@ -73,25 +75,41 @@ app.use((req, res, next) => {
 });
 
 // Health check (before swagger to avoid documentation overhead)
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    service: "Restaurant Management Service",
-    version: "1.0.0",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || "development",
-    status: "healthy",
-    database: "connected", // Will be updated after DB connection test
-    features: [
-      "Restaurant management",
-      "Menu and item management",
-      "Category management",
-      "Search and filtering",
-      "Location-based queries",
-      "Analytics and statistics",
-    ],
-  });
+app.get("/health", async (req, res) => {
+  try {
+    // Test database connection
+    await sequelize.authenticate();
+    res.status(200).json({
+      success: true,
+      service: "Restaurant Management Service",
+      version: "1.0.0",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || "development",
+      status: "healthy",
+      database: "connected",
+      features: [
+        "Restaurant management",
+        "Menu and item management",
+        "Category management",
+        "Search and filtering",
+        "Location-based queries",
+        "Analytics and statistics",
+      ],
+    });
+  } catch (error) {
+    res.status(503).json({
+      success: false,
+      service: "Restaurant Management Service",
+      version: "1.0.0",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || "development",
+      status: "unhealthy",
+      database: "disconnected",
+      error: error.message,
+    });
+  }
 });
 
 // Swagger Documentation
@@ -139,24 +157,31 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3002;
 
+// Declare server variable
+let server;
+
 // Graceful shutdown handling
 const gracefulShutdown = (signal) => {
   console.log(`\n${signal} received. Starting graceful shutdown...`);
 
-  server.close(() => {
-    console.log("HTTP server closed.");
+  if (server) {
+    server.close(() => {
+      console.log("HTTP server closed.");
 
-    sequelize
-      .close()
-      .then(() => {
-        console.log("Database connection closed.");
-        process.exit(0);
-      })
-      .catch((err) => {
-        console.error("Error during database shutdown:", err);
-        process.exit(1);
-      });
-  });
+      sequelize
+        .close()
+        .then(() => {
+          console.log("Database connection closed.");
+          process.exit(0);
+        })
+        .catch((err) => {
+          console.error("Error during database shutdown:", err);
+          process.exit(1);
+        });
+    });
+  } else {
+    process.exit(0);
+  }
 };
 
 // Start Server
@@ -170,11 +195,30 @@ const startServer = async () => {
     console.log("✅ Database connection established successfully.");
 
     // Sync database models
-    await sequelize.sync({
-      alter: process.env.NODE_ENV === "development",
-      force: process.env.DB_FORCE_SYNC === "true",
-    });
-    console.log("✅ Database models synchronized.");
+    try {
+      await sequelize.sync({
+        alter: process.env.NODE_ENV === "development",
+        force: process.env.DB_FORCE_SYNC === "true",
+      });
+      console.log("✅ Database models synchronized.");
+    } catch (syncError) {
+      if (
+        syncError.name === "SequelizeDatabaseError" &&
+        syncError.original?.code === "ER_TOO_MANY_KEYS"
+      ) {
+        console.error("❌ Database sync failed: Too many indexes on table.");
+        console.log("💡 Solution options:");
+        console.log(
+          "1. Set DB_FORCE_SYNC=true in your .env file to recreate tables"
+        );
+        console.log("2. Drop the problematic table manually");
+        console.log("3. Run: node scripts/resetDatabase.js");
+        throw new Error(
+          "Database has too many indexes. Please reset the database."
+        );
+      }
+      throw syncError;
+    }
 
     // Create upload directories
     const fs = require("fs");
@@ -193,7 +237,7 @@ const startServer = async () => {
       }
     });
 
-    const server = app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       console.log(`🚀 Restaurant Management Service running on port ${PORT}`);
       console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
       console.log(`🏥 Health Check: http://localhost:${PORT}/health`);
@@ -233,4 +277,3 @@ if (require.main === module) {
 }
 
 module.exports = app;
-

@@ -14,6 +14,12 @@ const {
 } = require("../validators/restaurantValidator");
 
 class RestaurantController {
+
+  
+  getUserID = (req) => {
+    return req.user?.uuid || req.headers["x-user-id"];
+  };
+
   // Create restaurant profile
   static async createRestaurant(req, res, next) {
     try {
@@ -26,7 +32,11 @@ class RestaurantController {
         });
       }
 
+
+
       const ownerId = req.user?.uuid || req.headers["x-user-id"];
+
+      console.log("Owner ID:", ownerId);
       if (!ownerId) {
         return res.status(401).json({
           success: false,
