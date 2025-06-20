@@ -1,66 +1,75 @@
+// models/RestaurantCategories.js
 module.exports = (sequelize, DataTypes) => {
-  const Category = sequelize.define(
-    "Category",
+  const RestaurantCategories = sequelize.define(
+    "RestaurantCategories",
     {
       id: {
         type: DataTypes.INTEGER,
         primaryKey: true,
         autoIncrement: true,
       },
-      uuid: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        unique: true,
+      restaurantId: {
+        type: DataTypes.INTEGER,
         allowNull: false,
+        field: "restaurant_id",
+        references: {
+          model: "restaurants",
+          key: "id",
+        },
+        onUpdate: "CASCADE",
+        onDelete: "CASCADE",
       },
-      name: {
-        type: DataTypes.STRING,
+      categoryId: {
+        type: DataTypes.INTEGER,
         allowNull: false,
-        unique: true,
-      },
-      description: {
-        type: DataTypes.TEXT,
-      },
-      icon: {
-        type: DataTypes.STRING,
-      },
-      color: {
-        type: DataTypes.STRING(7), // Hex color code
-        defaultValue: "#000000",
+        field: "category_id",
+        references: {
+          model: "categories",
+          key: "id",
+        },
+        onUpdate: "CASCADE",
+        onDelete: "CASCADE",
       },
       isActive: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
         field: "is_active",
       },
-      sortOrder: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        field: "sort_order",
+      addedBy: {
+        type: DataTypes.STRING, // UUID of the user who added this association
+        allowNull: true,
+        field: "added_by",
+      },
+      addedAt: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+        field: "added_at",
       },
     },
     {
-      tableName: "categories",
+      tableName: "restaurant_categories",
       timestamps: true,
       createdAt: "created_at",
       updatedAt: "updated_at",
       indexes: [
-        { fields: ["name"] },
+        {
+          unique: true,
+          fields: ["restaurant_id", "category_id"],
+          name: "unique_restaurant_category",
+        },
+        { fields: ["restaurant_id"] },
+        { fields: ["category_id"] },
         { fields: ["is_active"] },
-        { fields: ["sort_order"] },
       ],
     }
   );
 
-  Category.associate = function (models) {
-    Category.hasMany(models.Item, { foreignKey: "categoryId", as: "items" });
-    Category.belongsToMany(models.Restaurant, {
-      through: "RestaurantCategories",
-      foreignKey: "categoryId",
-      otherKey: "restaurantId",
-      as: "restaurants",
-    });
+  // No associations needed for junction tables
+  RestaurantCategories.associate = function (models) {
+    // Junction tables typically don't need explicit associations
+    // The relationships are handled by the belongsToMany associations
+    // in the Restaurant and Category models
   };
 
-  return Category;
+  return RestaurantCategories;
 };
