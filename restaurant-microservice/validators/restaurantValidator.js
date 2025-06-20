@@ -1,6 +1,6 @@
 const Joi = require("joi");
 
-const   restaurantValidation = Joi.object({
+const restaurantValidation = Joi.object({
   name: Joi.string().min(2).max(100).required().messages({
     "string.min": "Restaurant name must be at least 2 characters long",
     "string.max": "Restaurant name cannot exceed 100 characters",
@@ -23,15 +23,12 @@ const   restaurantValidation = Joi.object({
   }),
   address: Joi.string().max(500).required().messages({
     "string.max": "Address cannot exceed 500 characters",
-    "any.required": "Address is required",
   }),
   city: Joi.string().max(100).required().messages({
     "string.max": "City name cannot exceed 100 characters",
-    "any.required": "City is required",
   }),
   postalCode: Joi.string().max(20).required().messages({
     "string.max": "Postal code cannot exceed 20 characters",
-    "any.required": "Postal code is required",
   }),
   country: Joi.string().max(100).default("France").optional(),
   latitude: Joi.number().min(-90).max(90).optional().messages({
@@ -42,9 +39,79 @@ const   restaurantValidation = Joi.object({
     "number.min": "Longitude must be between -180 and 180",
     "number.max": "Longitude must be between -180 and 180",
   }),
-
+  deliveryFee: Joi.number().min(0).max(50).default(0).optional().messages({
+    "number.min": "Delivery fee cannot be negative",
+    "number.max": "Delivery fee cannot exceed 50",
+  }),
+  minimumOrder: Joi.number().min(0).default(0).optional().messages({
+    "number.min": "Minimum order cannot be negative",
+  }),
+  averageDeliveryTime: Joi.number()
+    .min(10)
+    .max(120)
+    .default(30)
+    .optional()
+    .messages({
+      "number.min": "Average delivery time must be at least 10 minutes",
+      "number.max": "Average delivery time cannot exceed 120 minutes",
+    }),
+  openingHours: Joi.object({
+    0: Joi.object({
+      // Sunday
+      open: Joi.number().min(0).max(2359).optional(),
+      close: Joi.number().min(0).max(2359).optional(),
+      isClosed: Joi.boolean().default(false),
+    }).optional(),
+    1: Joi.object({
+      // Monday
+      open: Joi.number().min(0).max(2359).optional(),
+      close: Joi.number().min(0).max(2359).optional(),
+      isClosed: Joi.boolean().default(false),
+    }).optional(),
+    2: Joi.object({
+      // Tuesday
+      open: Joi.number().min(0).max(2359).optional(),
+      close: Joi.number().min(0).max(2359).optional(),
+      isClosed: Joi.boolean().default(false),
+    }).optional(),
+    3: Joi.object({
+      // Wednesday
+      open: Joi.number().min(0).max(2359).optional(),
+      close: Joi.number().min(0).max(2359).optional(),
+      isClosed: Joi.boolean().default(false),
+    }).optional(),
+    4: Joi.object({
+      // Thursday
+      open: Joi.number().min(0).max(2359).optional(),
+      close: Joi.number().min(0).max(2359).optional(),
+      isClosed: Joi.boolean().default(false),
+    }).optional(),
+    5: Joi.object({
+      // Friday
+      open: Joi.number().min(0).max(2359).optional(),
+      close: Joi.number().min(0).max(2359).optional(),
+      isClosed: Joi.boolean().default(false),
+    }).optional(),
+    6: Joi.object({
+      // Saturday
+      open: Joi.number().min(0).max(2359).optional(),
+      close: Joi.number().min(0).max(2359).optional(),
+      isClosed: Joi.boolean().default(false),
+    }).optional(),
+  }).optional(),
+  tags: Joi.array()
+    .items(
+      Joi.string().max(50).messages({
+        "string.max": "Each tag cannot exceed 50 characters",
+      })
+    )
+    .max(10)
+    .optional()
+    .messages({
+      "array.max": "Cannot have more than 10 tags",
+    }),
   businessLicense: Joi.string().max(100).optional(),
- 
+
 });
 
 const updateRestaurantValidation = Joi.object({
