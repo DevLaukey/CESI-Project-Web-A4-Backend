@@ -1,6 +1,6 @@
 const Joi = require("joi");
 
-const restaurantValidation = Joi.object({
+const   restaurantValidation = Joi.object({
   name: Joi.string().min(2).max(100).required().messages({
     "string.min": "Restaurant name must be at least 2 characters long",
     "string.max": "Restaurant name cannot exceed 100 characters",
@@ -42,86 +42,9 @@ const restaurantValidation = Joi.object({
     "number.min": "Longitude must be between -180 and 180",
     "number.max": "Longitude must be between -180 and 180",
   }),
-  deliveryFee: Joi.number().min(0).max(50).default(0).optional().messages({
-    "number.min": "Delivery fee cannot be negative",
-    "number.max": "Delivery fee cannot exceed 50",
-  }),
-  minimumOrder: Joi.number().min(0).default(0).optional().messages({
-    "number.min": "Minimum order cannot be negative",
-  }),
-  averageDeliveryTime: Joi.number()
-    .min(10)
-    .max(120)
-    .default(30)
-    .optional()
-    .messages({
-      "number.min": "Average delivery time must be at least 10 minutes",
-      "number.max": "Average delivery time cannot exceed 120 minutes",
-    }),
-  openingHours: Joi.object({
-    0: Joi.object({
-      // Sunday
-      open: Joi.number().min(0).max(2359).optional(),
-      close: Joi.number().min(0).max(2359).optional(),
-      isClosed: Joi.boolean().default(false),
-    }).optional(),
-    1: Joi.object({
-      // Monday
-      open: Joi.number().min(0).max(2359).optional(),
-      close: Joi.number().min(0).max(2359).optional(),
-      isClosed: Joi.boolean().default(false),
-    }).optional(),
-    2: Joi.object({
-      // Tuesday
-      open: Joi.number().min(0).max(2359).optional(),
-      close: Joi.number().min(0).max(2359).optional(),
-      isClosed: Joi.boolean().default(false),
-    }).optional(),
-    3: Joi.object({
-      // Wednesday
-      open: Joi.number().min(0).max(2359).optional(),
-      close: Joi.number().min(0).max(2359).optional(),
-      isClosed: Joi.boolean().default(false),
-    }).optional(),
-    4: Joi.object({
-      // Thursday
-      open: Joi.number().min(0).max(2359).optional(),
-      close: Joi.number().min(0).max(2359).optional(),
-      isClosed: Joi.boolean().default(false),
-    }).optional(),
-    5: Joi.object({
-      // Friday
-      open: Joi.number().min(0).max(2359).optional(),
-      close: Joi.number().min(0).max(2359).optional(),
-      isClosed: Joi.boolean().default(false),
-    }).optional(),
-    6: Joi.object({
-      // Saturday
-      open: Joi.number().min(0).max(2359).optional(),
-      close: Joi.number().min(0).max(2359).optional(),
-      isClosed: Joi.boolean().default(false),
-    }).optional(),
-  }).optional(),
-  tags: Joi.array()
-    .items(
-      Joi.string().max(50).messages({
-        "string.max": "Each tag cannot exceed 50 characters",
-      })
-    )
-    .max(10)
-    .optional()
-    .messages({
-      "array.max": "Cannot have more than 10 tags",
-    }),
+
   businessLicense: Joi.string().max(100).optional(),
-  settings: Joi.object({
-    acceptsOnlineOrders: Joi.boolean().default(true),
-    acceptsCashOnDelivery: Joi.boolean().default(true),
-    acceptsCardPayment: Joi.boolean().default(true),
-    autoAcceptOrders: Joi.boolean().default(false),
-    preparationBuffer: Joi.number().min(0).max(60).default(5),
-    maxOrdersPerHour: Joi.number().min(1).max(100).default(20),
-  }).optional(),
+ 
 });
 
 const updateRestaurantValidation = Joi.object({
