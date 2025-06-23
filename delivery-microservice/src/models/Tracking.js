@@ -1,4 +1,4 @@
-const db = require("../config/database");
+const { sequelize } = require("../config/database");
 const logger = require("../utils/logger");
 const { v4: uuidv4 } = require("uuid");
 
@@ -7,12 +7,80 @@ const { v4: uuidv4 } = require("uuid");
  * Handles all database operations for tracking data
  */
 class Tracking {
+  static async createTables() {
+    try {
+      // Create delivery_tracking table
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS delivery_tracking (
+          id VARCHAR(36) PRIMARY KEY,
+          delivery_id VARCHAR(36) NOT NULL,
+          driver_id VARCHAR(36),
+          status VARCHAR(50),
+          latitude DECIMAL(10, 8),
+          longitude DECIMAL(11, 8),
+          accuracy DECIMAL(8, 2),
+          heading DECIMAL(5, 2),
+          speed DECIMAL(5, 2),
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          updated_by VARCHAR(36),
+          INDEX idx_delivery (delivery_id),
+          INDEX idx_driver (driver_id),
+          INDEX idx_created_at (created_at),
+          FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE CASCADE
+        )
+      `);
+
+      // Create location_history table
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS location_history (
+          id VARCHAR(36) PRIMARY KEY,
+          driver_id VARCHAR(36) NOT NULL,
+          latitude DECIMAL(10, 8) NOT NULL,
+          longitude DECIMAL(11, 8) NOT NULL,
+          accuracy DECIMAL(8, 2),
+          heading DECIMAL(5, 2),
+          speed DECIMAL(5, 2),
+          altitude DECIMAL(8, 2),
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          battery_level INT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_driver (driver_id),
+          INDEX idx_timestamp (timestamp),
+          FOREIGN KEY (driver_id) REFERENCES drivers(id) ON DELETE CASCADE
+        )
+      `);
+
+      // Create delivery_routes table
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS delivery_routes (
+          id VARCHAR(36) PRIMARY KEY,
+          delivery_id VARCHAR(36) NOT NULL,
+          route_data JSON,
+          estimated_duration INT,
+          estimated_distance DECIMAL(8, 2),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_delivery (delivery_id),
+          FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE CASCADE
+        )
+      `);
+
+      console.log("✅ Tracking tables created successfully!");
+    } catch (error) {
+      console.error("❌ Error creating tracking tables:", error);
+      throw error;
+    }
+  }
+
   /**
    * Get delivery tracking information
    */
   static async getDeliveryTracking(deliveryId) {
     try {
-      const query = `
+      const events = await sequelize.query(
+        `
         SELECT 
           dt.*,
           d.tracking_number,
@@ -25,14 +93,17 @@ class Tracking {
         LEFT JOIN drivers dr ON dt.driver_id = dr.id
         WHERE dt.delivery_id = ?
         ORDER BY dt.created_at DESC
-      `;
-
-      const [rows] = await db.execute(query, [deliveryId]);
+      `,
+        {
+          replacements: [deliveryId],
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
 
       return {
         delivery_id: deliveryId,
-        events: rows,
-        last_updated: rows.length > 0 ? rows[0].created_at : null,
+        events: events,
+        last_updated: events.length > 0 ? events[0].created_at : null,
       };
     } catch (error) {
       logger.error("Error getting delivery tracking:", error);
@@ -44,60 +115,65 @@ class Tracking {
    * Update delivery tracking
    */
   static async updateDeliveryTracking(trackingData) {
-    const connection = await db.getConnection();
+    const transaction = await sequelize.transaction();
 
     try {
-      await connection.beginTransaction();
-
       const trackingId = uuidv4();
 
-      const query = `
+      await sequelize.query(
+        `
         INSERT INTO delivery_tracking (
           id, delivery_id, driver_id, status, latitude, longitude,
           accuracy, heading, speed, notes, created_at, updated_by
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
-      const values = [
-        trackingId,
-        trackingData.delivery_id,
-        trackingData.driver_id,
-        trackingData.status,
-        trackingData.location?.latitude,
-        trackingData.location?.longitude,
-        trackingData.location?.accuracy,
-        trackingData.location?.heading,
-        trackingData.location?.speed,
-        trackingData.notes,
-        trackingData.timestamp,
-        trackingData.updated_by,
-      ];
-
-      await connection.execute(query, values);
-
-      // Update the latest tracking info in deliveries table
-      await connection.execute(
-        `UPDATE deliveries 
-         SET last_tracked_at = ?, last_known_lat = ?, last_known_lng = ?
-         WHERE id = ?`,
-        [
-          trackingData.timestamp,
-          trackingData.location?.latitude,
-          trackingData.location?.longitude,
-          trackingData.delivery_id,
-        ]
+      `,
+        {
+          replacements: [
+            trackingId,
+            trackingData.delivery_id,
+            trackingData.driver_id,
+            trackingData.status,
+            trackingData.location?.latitude,
+            trackingData.location?.longitude,
+            trackingData.location?.accuracy,
+            trackingData.location?.heading,
+            trackingData.location?.speed,
+            trackingData.notes,
+            trackingData.timestamp,
+            trackingData.updated_by,
+          ],
+          type: sequelize.QueryTypes.INSERT,
+          transaction,
+        }
       );
 
-      await connection.commit();
+      // Update the latest tracking info in deliveries table
+      await sequelize.query(
+        `
+        UPDATE deliveries 
+        SET last_tracked_at = ?, last_known_lat = ?, last_known_lng = ?
+        WHERE id = ?
+      `,
+        {
+          replacements: [
+            trackingData.timestamp,
+            trackingData.location?.latitude,
+            trackingData.location?.longitude,
+            trackingData.delivery_id,
+          ],
+          type: sequelize.QueryTypes.UPDATE,
+          transaction,
+        }
+      );
+
+      await transaction.commit();
 
       logger.info(`Delivery tracking updated: ${trackingData.delivery_id}`);
       return trackingId;
     } catch (error) {
-      await connection.rollback();
+      await transaction.rollback();
       logger.error("Error updating delivery tracking:", error);
       throw error;
-    } finally {
-      connection.release();
     }
   }
 
@@ -108,27 +184,30 @@ class Tracking {
     try {
       const locationId = uuidv4();
 
-      const query = `
+      await sequelize.query(
+        `
         INSERT INTO location_history (
           id, driver_id, latitude, longitude, accuracy, 
           heading, speed, altitude, timestamp, battery_level
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
+      `,
+        {
+          replacements: [
+            locationId,
+            locationData.driver_id,
+            locationData.latitude,
+            locationData.longitude,
+            locationData.accuracy,
+            locationData.heading,
+            locationData.speed,
+            locationData.altitude,
+            locationData.timestamp,
+            locationData.battery_level,
+          ],
+          type: sequelize.QueryTypes.INSERT,
+        }
+      );
 
-      const values = [
-        locationId,
-        locationData.driver_id,
-        locationData.latitude,
-        locationData.longitude,
-        locationData.accuracy,
-        locationData.heading,
-        locationData.speed,
-        locationData.altitude,
-        locationData.timestamp,
-        locationData.battery_level,
-      ];
-
-      await db.execute(query, values);
       return locationId;
     } catch (error) {
       logger.error("Error saving location history:", error);
@@ -146,31 +225,32 @@ class Tracking {
     limit = 100
   ) {
     try {
-      let query = `
+      let sql = `
         SELECT 
           latitude, longitude, accuracy, heading, speed, 
           altitude, timestamp, battery_level
         FROM location_history
         WHERE driver_id = ?
       `;
-
-      const params = [driverId];
+      let replacements = [driverId];
 
       if (startDate) {
-        query += ` AND timestamp >= ?`;
-        params.push(startDate);
+        sql += ` AND timestamp >= ?`;
+        replacements.push(startDate);
       }
 
       if (endDate) {
-        query += ` AND timestamp <= ?`;
-        params.push(endDate);
+        sql += ` AND timestamp <= ?`;
+        replacements.push(endDate);
       }
 
-      query += ` ORDER BY timestamp DESC LIMIT ?`;
-      params.push(limit);
+      sql += ` ORDER BY timestamp DESC LIMIT ?`;
+      replacements.push(limit);
 
-      const [rows] = await db.execute(query, params);
-      return rows;
+      return await sequelize.query(sql, {
+        replacements,
+        type: sequelize.QueryTypes.SELECT,
+      });
     } catch (error) {
       logger.error("Error getting driver location history:", error);
       throw error;
@@ -182,7 +262,8 @@ class Tracking {
    */
   static async getLocationHistory(deliveryId) {
     try {
-      const query = `
+      return await sequelize.query(
+        `
         SELECT 
           dt.latitude, dt.longitude, dt.accuracy, dt.heading, 
           dt.speed, dt.status, dt.notes, dt.created_at,
@@ -192,10 +273,12 @@ class Tracking {
         LEFT JOIN drivers dr ON dt.driver_id = dr.id
         WHERE dt.delivery_id = ? AND dt.latitude IS NOT NULL
         ORDER BY dt.created_at ASC
-      `;
-
-      const [rows] = await db.execute(query, [deliveryId]);
-      return rows;
+      `,
+        {
+          replacements: [deliveryId],
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
     } catch (error) {
       logger.error("Error getting delivery location history:", error);
       throw error;
@@ -207,27 +290,31 @@ class Tracking {
    */
   static async updateDeliveryLocation(deliveryId, locationData) {
     try {
-      const query = `
+      await sequelize.query(
+        `
         UPDATE delivery_tracking 
         SET latitude = ?, longitude = ?, accuracy = ?, heading = ?, 
             speed = ?, updated_at = ?
         WHERE delivery_id = ? AND created_at = (
-          SELECT MAX(created_at) FROM delivery_tracking WHERE delivery_id = ?
+          SELECT MAX(created_at) FROM (
+            SELECT created_at FROM delivery_tracking WHERE delivery_id = ?
+          ) as dt_max
         )
-      `;
-
-      const values = [
-        locationData.latitude,
-        locationData.longitude,
-        locationData.accuracy,
-        locationData.heading,
-        locationData.speed,
-        locationData.timestamp,
-        deliveryId,
-        deliveryId,
-      ];
-
-      await db.execute(query, values);
+      `,
+        {
+          replacements: [
+            locationData.latitude,
+            locationData.longitude,
+            locationData.accuracy,
+            locationData.heading,
+            locationData.speed,
+            locationData.timestamp,
+            deliveryId,
+            deliveryId,
+          ],
+          type: sequelize.QueryTypes.UPDATE,
+        }
+      );
     } catch (error) {
       logger.error("Error updating delivery location:", error);
       throw error;
@@ -239,22 +326,25 @@ class Tracking {
    */
   static async getDeliveryRoute(deliveryId) {
     try {
-      const query = `
+      const [route] = await sequelize.query(
+        `
         SELECT route_data, estimated_duration, estimated_distance,
                created_at, updated_at
         FROM delivery_routes
         WHERE delivery_id = ?
         ORDER BY created_at DESC
         LIMIT 1
-      `;
+      `,
+        {
+          replacements: [deliveryId],
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
 
-      const [rows] = await db.execute(query, [deliveryId]);
-
-      if (rows.length === 0) {
+      if (!route) {
         return null;
       }
 
-      const route = rows[0];
       return {
         route_data: JSON.parse(route.route_data),
         estimated_duration: route.estimated_duration,
@@ -275,22 +365,25 @@ class Tracking {
     try {
       const routeId = uuidv4();
 
-      const query = `
+      await sequelize.query(
+        `
         INSERT INTO delivery_routes (
           id, delivery_id, route_data, estimated_duration, 
           estimated_distance, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, NOW(), NOW())
-      `;
+      `,
+        {
+          replacements: [
+            routeId,
+            deliveryId,
+            JSON.stringify(routeData),
+            routeData.duration,
+            routeData.distance,
+          ],
+          type: sequelize.QueryTypes.INSERT,
+        }
+      );
 
-      const values = [
-        routeId,
-        deliveryId,
-        JSON.stringify(routeData),
-        routeData.duration,
-        routeData.distance,
-      ];
-
-      await db.execute(query, values);
       return routeId;
     } catch (error) {
       logger.error("Error saving delivery route:", error);
@@ -366,16 +459,21 @@ class Tracking {
       }
 
       // Get delivery destination
-      const [deliveryRows] = await db.execute(
-        "SELECT pickup_lat, pickup_lng, delivery_lat, delivery_lng FROM deliveries WHERE id = ?",
-        [deliveryId]
+      const [delivery] = await sequelize.query(
+        `
+        SELECT pickup_lat, pickup_lng, delivery_lat, delivery_lng 
+        FROM deliveries 
+        WHERE id = ?
+      `,
+        {
+          replacements: [deliveryId],
+          type: sequelize.QueryTypes.SELECT,
+        }
       );
 
-      if (deliveryRows.length === 0) {
+      if (!delivery) {
         return { progress: 0, remaining_distance: 0, remaining_time: 0 };
       }
-
-      const delivery = deliveryRows[0];
 
       // Calculate total route distance
       const totalDistance = this.calculateDistance(
@@ -424,29 +522,30 @@ class Tracking {
   static async getTrackingAnalytics(filters) {
     try {
       let whereClause = "WHERE 1=1";
-      const params = [];
+      let replacements = [];
 
       // Build time filter
       if (filters.timeframe) {
         const timeFilter = this.buildTimeFilter(filters.timeframe);
         whereClause += ` AND dt.created_at >= ?`;
-        params.push(timeFilter);
+        replacements.push(timeFilter);
       }
 
       if (filters.driver_id) {
         whereClause += ` AND dt.driver_id = ?`;
-        params.push(filters.driver_id);
+        replacements.push(filters.driver_id);
       }
 
       if (filters.restaurant_id) {
         whereClause += ` AND d.restaurant_id = ?`;
-        params.push(filters.restaurant_id);
+        replacements.push(filters.restaurant_id);
       }
 
-      const query = `
+      const [analytics] = await sequelize.query(
+        `
         SELECT 
           COUNT(DISTINCT dt.delivery_id) as total_deliveries,
-          AVG(TIMESTAMPDIFF(MINUTE, d.created_at, d.delivered_at)) as avg_delivery_time,
+          AVG(TIMESTAMPDIFF(MINUTE, d.created_at, d.delivery_time)) as avg_delivery_time,
           COUNT(CASE WHEN d.status = 'delivered' THEN 1 END) * 100.0 / COUNT(*) as success_rate,
           AVG(
             CASE WHEN dt.latitude IS NOT NULL AND dt.longitude IS NOT NULL 
@@ -455,15 +554,19 @@ class Tracking {
                   sin(radians(d.pickup_lat)) * sin(radians(d.delivery_lat))))
             END
           ) as avg_distance,
-          COUNT(CASE WHEN d.delivered_at <= d.estimated_delivery_time THEN 1 END) * 100.0 / 
+          COUNT(CASE WHEN d.delivery_time <= d.estimated_delivery_time THEN 1 END) * 100.0 / 
           COUNT(CASE WHEN d.status = 'delivered' THEN 1 END) as on_time_percentage
         FROM delivery_tracking dt
         LEFT JOIN deliveries d ON dt.delivery_id = d.id
         ${whereClause}
-      `;
+      `,
+        {
+          replacements,
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
 
-      const [rows] = await db.execute(query, params);
-      return rows[0] || {};
+      return analytics || {};
     } catch (error) {
       logger.error("Error getting tracking analytics:", error);
       throw error;
@@ -477,11 +580,12 @@ class Tracking {
     try {
       const timeFilter = this.buildTimeFilter(timeframe);
 
-      const query = `
+      return await sequelize.query(
+        `
         SELECT 
           dt.latitude, dt.longitude, 
           COUNT(*) as delivery_count,
-          AVG(TIMESTAMPDIFF(MINUTE, d.created_at, d.delivered_at)) as avg_delivery_time
+          AVG(TIMESTAMPDIFF(MINUTE, d.created_at, d.delivery_time)) as avg_delivery_time
         FROM delivery_tracking dt
         LEFT JOIN deliveries d ON dt.delivery_id = d.id
         WHERE dt.latitude BETWEEN ? AND ?
@@ -495,18 +599,18 @@ class Tracking {
         HAVING delivery_count > 1
         ORDER BY delivery_count DESC
         LIMIT 1000
-      `;
-
-      const params = [
-        bounds.south,
-        bounds.north,
-        bounds.west,
-        bounds.east,
-        timeFilter,
-      ];
-
-      const [rows] = await db.execute(query, params);
-      return rows;
+      `,
+        {
+          replacements: [
+            bounds.south,
+            bounds.north,
+            bounds.west,
+            bounds.east,
+            timeFilter,
+          ],
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
     } catch (error) {
       logger.error("Error getting delivery heatmap:", error);
       throw error;
@@ -519,26 +623,27 @@ class Tracking {
   static async exportTrackingData(filters) {
     try {
       let whereClause = "WHERE 1=1";
-      const params = [];
+      let replacements = [];
 
       if (filters.start_date) {
         whereClause += ` AND dt.created_at >= ?`;
-        params.push(filters.start_date);
+        replacements.push(filters.start_date);
       }
 
       if (filters.end_date) {
         whereClause += ` AND dt.created_at <= ?`;
-        params.push(filters.end_date);
+        replacements.push(filters.end_date);
       }
 
       if (filters.delivery_ids && filters.delivery_ids.length > 0) {
         whereClause += ` AND dt.delivery_id IN (${filters.delivery_ids
           .map(() => "?")
           .join(",")})`;
-        params.push(...filters.delivery_ids);
+        replacements.push(...filters.delivery_ids);
       }
 
-      const query = `
+      return await sequelize.query(
+        `
         SELECT 
           dt.delivery_id,
           d.tracking_number,
@@ -561,10 +666,12 @@ class Tracking {
         ${whereClause}
         ORDER BY dt.created_at DESC
         LIMIT 10000
-      `;
-
-      const [rows] = await db.execute(query, params);
-      return rows;
+      `,
+        {
+          replacements,
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
     } catch (error) {
       logger.error("Error exporting tracking data:", error);
       throw error;
