@@ -14,17 +14,25 @@ const {
 } = require("../validators/restaurantValidator");
 
 class RestaurantController {
-
-  
-  getUserID = (req) => {
+  // Helper method to get user ID
+  static getUserID(req) {
     return req.user?.uuid || req.headers["x-user-id"];
-  };
+  }
 
   // Create restaurant profile
   static async createRestaurant(req, res, next) {
+    const transaction = await sequelize.transaction();
+
     try {
+      console.log("=== RESTAURANT CREATION DEBUG ===");
+      console.log("1. Request body:", JSON.stringify(req.body, null, 2));
+      console.log("2. Request headers:", req.headers);
+
+      // Validation
       const { error, value } = restaurantValidation.validate(req.body);
       if (error) {
+        console.log("3. Validation error:", error.details);
+        await transaction.rollback();
         return res.status(400).json({
           success: false,
           error: "Validation Error",
@@ -32,12 +40,17 @@ class RestaurantController {
         });
       }
 
+      console.log(
+        "3. Validation passed. Validated data:",
+        JSON.stringify(value, null, 2)
+      );
 
+      // Get owner ID
+      const ownerId = RestaurantController.getUserID(req);
+      console.log("4. Owner ID:", ownerId);
 
-      const ownerId = req.user?.uuid || req.headers["x-user-id"];
-
-      console.log("Owner ID:", ownerId);
       if (!ownerId) {
+        await transaction.rollback();
         return res.status(401).json({
           success: false,
           error: "Authentication required",
@@ -46,10 +59,15 @@ class RestaurantController {
       }
 
       // Check if restaurant already exists for this owner
+      console.log("5. Checking for existing restaurant...");
       const existingRestaurant = await Restaurant.findOne({
         where: { ownerId },
+        transaction,
       });
+
       if (existingRestaurant) {
+        console.log("6. Restaurant already exists for owner:", ownerId);
+        await transaction.rollback();
         return res.status(400).json({
           success: false,
           error: "Restaurant already exists",
@@ -57,17 +75,178 @@ class RestaurantController {
         });
       }
 
-      const restaurant = await Restaurant.create({
+      console.log(
+        "6. No existing restaurant found. Proceeding with creation..."
+      );
+
+      // Prepare restaurant data
+      const restaurantData = {
         ownerId,
         ...value,
+      };
+
+      console.log(
+        "7. Final restaurant data to be saved:",
+        JSON.stringify(restaurantData, null, 2)
+      );
+
+      // Create restaurant with transaction
+      console.log("8. Attempting to create restaurant in database...");
+      const restaurant = await Restaurant.create(restaurantData, {
+        transaction,
       });
+
+      console.log("9. Restaurant created successfully with ID:", restaurant.id);
+      console.log(
+        "10. Created restaurant data:",
+        JSON.stringify(restaurant.toJSON(), null, 2)
+      );
+
+      // Commit transaction
+      await transaction.commit();
+      console.log("11. Transaction committed successfully");
+
+      // Return the created restaurant
+      const responseData = restaurant.toSafeJSON
+        ? restaurant.toSafeJSON()
+        : restaurant.toJSON();
+
+      console.log(
+        "12. Sending response:",
+        JSON.stringify(responseData, null, 2)
+      );
 
       res.status(201).json({
         success: true,
         message: "Restaurant created successfully",
-        restaurant: restaurant.toSafeJSON(),
+        restaurant: responseData,
       });
     } catch (error) {
+      console.error("=== RESTAURANT CREATION ERROR ===");
+      console.error("Error details:", error);
+      console.error("Error name:", error.name);
+      console.error("Error message:", error.message);
+
+      if (error.sql) {
+        console.error("SQL Query:", error.sql);
+      }
+
+      if (error.original) {
+        console.error("Original error:", error.original);
+      }
+
+      await transaction.rollback();
+      console.log("Transaction rolled back");
+
+      // Handle specific database errors
+      if (error.name === "SequelizeValidationError") {
+        console.error("Validation errors:", error.errors);
+        return res.status(400).json({
+          success: false,
+          error: "Database Validation Error",
+          details: error.errors.map((err) => ({
+            field: err.path,
+            message: err.message,
+            value: err.value,
+            validatorKey: err.validatorKey,
+          })),
+        });
+      }
+
+      if (error.name === "SequelizeUniqueConstraintError") {
+        console.error("Unique constraint errors:", error.errors);
+        return res.status(409).json({
+          success: false,
+          error: "Duplicate Entry",
+          message: "A restaurant with this information already exists",
+          details: error.errors.map((err) => ({
+            field: err.path,
+            message: err.message,
+            value: err.value,
+          })),
+        });
+      }
+
+      if (error.name === "SequelizeForeignKeyConstraintError") {
+        console.error("Foreign key constraint error:", error.fields);
+        return res.status(400).json({
+          success: false,
+          error: "Foreign Key Error",
+          message: "Referenced record does not exist",
+          field: error.fields,
+        });
+      }
+
+      if (error.name === "SequelizeDatabaseError") {
+        console.error("Database error:", error.parent);
+        return res.status(500).json({
+          success: false,
+          error: "Database Error",
+          message: "There was an issue with the database operation",
+          details: error.parent?.message || error.message,
+        });
+      }
+
+      next(error);
+    }
+  }
+
+  // Search restaurants by name or description
+  static async searchRestaurants(req, res, next) {
+    try {
+      const { query } = req.query;
+      if (!query || query.trim() === "") {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid Query",
+          message: "Search query cannot be empty",
+        });
+      }
+      const restaurants = await Restaurant.findAll({
+        where: {
+          isActive: true,
+          [Op.or]: [
+            { name: { [Op.iLike]: `%${query}%` } },
+            { description: { [Op.iLike]: `%${query}%` } },
+          ],
+        },
+        include: [
+          {
+            model: Item,
+            as: "items",
+            where: { isAvailable: true },
+            required: false,
+            limit: 3,
+
+            order: [
+              ["isPopular", "DESC"],
+              ["rating", "DESC"],
+            ],
+          },
+        ],
+        order: [["rating", "DESC"]],
+        limit: 20,
+      });
+      const restaurantsWithStatus = restaurants.map((restaurant) => {
+        const restaurantData = restaurant.toSafeJSON
+          ? restaurant.toSafeJSON()
+          : restaurant.toJSON();
+        if (typeof restaurant.isOpenNow === "function") {
+          restaurantData.isOpenNow = restaurant.isOpenNow();
+        }
+        return restaurantData;
+      });
+      res.json({
+        success: true,
+        restaurants: restaurantsWithStatus,
+      });
+    } catch (error) {
+      console.error("Error searching restaurants:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal Server Error",
+        message: "An error occurred while searching for restaurants",
+      });
       next(error);
     }
   }
@@ -108,7 +287,6 @@ class RestaurantController {
             where: { isVisible: true },
             required: false,
             limit: 5,
-            order: [["createdAt", "DESC"]],
           },
         ],
       });
@@ -122,12 +300,18 @@ class RestaurantController {
       }
 
       // Add calculated fields
-      const restaurantData = restaurant.toSafeJSON();
-      restaurantData.isOpenNow = restaurant.isOpenNow();
+      const restaurantData = restaurant.toSafeJSON
+        ? restaurant.toSafeJSON()
+        : restaurant.toJSON();
+
+      // Add isOpenNow if method exists
+      if (typeof restaurant.isOpenNow === "function") {
+        restaurantData.isOpenNow = restaurant.isOpenNow();
+      }
 
       // Add distance if coordinates provided
       const { lat, lng } = req.query;
-      if (lat && lng) {
+      if (lat && lng && typeof restaurant.calculateDistance === "function") {
         restaurantData.distance = restaurant.calculateDistance(
           parseFloat(lat),
           parseFloat(lng)
@@ -143,10 +327,69 @@ class RestaurantController {
     }
   }
 
+  // Get all restaurants with pagination and sorting
+  static async getAllRestaurants(req, res, next) {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        sortBy = "rating",
+        sortOrder = "DESC",
+      } = req.query;
+
+      const { count, rows: restaurants } = await Restaurant.findAndCountAll({
+        where: { isActive: true },
+        include: [
+          {
+            model: Item,
+            as: "items",
+            where: { isAvailable: true },
+            required: false,
+            limit: 3,
+            order: [
+              ["isPopular", "DESC"],
+              ["rating", "DESC"],
+            ],
+          },
+        ],
+        limit: Math.min(parseInt(limit), 50),
+        offset: (parseInt(page) - 1) * parseInt(limit),
+        order: [[sortBy, sortOrder.toUpperCase()]],
+      });
+
+      const restaurantsWithStatus = restaurants.map((restaurant) => {
+        const restaurantData = restaurant.toSafeJSON
+          ? restaurant.toSafeJSON()
+          : restaurant.toJSON();
+
+        if (typeof restaurant.isOpenNow === "function") {
+          restaurantData.isOpenNow = restaurant.isOpenNow();
+        }
+
+        return restaurantData;
+      });
+
+      res.json({
+        success: true,
+        restaurants: restaurantsWithStatus,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(count / parseInt(limit)),
+          totalCount: count,
+          hasNextPage: parseInt(page) < Math.ceil(count / parseInt(limit)),
+          hasPrevPage: parseInt(page) > 1,
+          limit: parseInt(limit),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // Get owner's restaurant
   static async getMyRestaurant(req, res, next) {
     try {
-      const ownerId = req.user?.uuid || req.headers["x-user-id"];
+      const ownerId = RestaurantController.getUserID(req);
 
       const restaurant = await Restaurant.findOne({
         where: { ownerId },
@@ -195,7 +438,7 @@ class RestaurantController {
         });
       }
 
-      const ownerId = req.user?.uuid || req.headers["x-user-id"];
+      const ownerId = RestaurantController.getUserID(req);
       const restaurant = await Restaurant.findOne({ where: { ownerId } });
 
       if (!restaurant) {
@@ -208,187 +451,60 @@ class RestaurantController {
 
       await restaurant.update(value);
 
+      const responseData = restaurant.toSafeJSON
+        ? restaurant.toSafeJSON()
+        : restaurant.toJSON();
+
       res.json({
         success: true,
         message: "Restaurant updated successfully",
-        restaurant: restaurant.toSafeJSON(),
+        restaurant: responseData,
       });
     } catch (error) {
       next(error);
     }
   }
 
-  // Search restaurants
-  static async searchRestaurants(req, res, next) {
+
+  // Get restaurant statistics
+  static async getStatistics(req, res, next) {
     try {
-      const {
-        q, // search query
-        city,
-        cuisineType,
-        isOpen,
-        minRating,
-        maxDeliveryFee,
-        page = 1,
-        limit = 20,
-        sortBy = "rating",
-        sortOrder = "DESC",
-        lat,
-        lng,
-        radius = 10,
-      } = req.query;
+      const ownerId = RestaurantController.getUserID(req);
 
-      const whereClause = {
-        isActive: true,
-      };
-
-      // Search query
-      if (q) {
-        whereClause[Op.or] = [
-          { name: { [Op.like]: `%${q}%` } },
-          { description: { [Op.like]: `%${q}%` } },
-          { cuisineType: { [Op.like]: `%${q}%` } },
-        ];
-      }
-
-      // Filters
-      if (city) whereClause.city = city;
-      if (cuisineType) whereClause.cuisineType = cuisineType;
-      if (isOpen === "true") whereClause.isOpen = true;
-      if (minRating) whereClause.rating = { [Op.gte]: parseFloat(minRating) };
-      if (maxDeliveryFee)
-        whereClause.deliveryFee = { [Op.lte]: parseFloat(maxDeliveryFee) };
-
-      // Location-based filtering
-      let havingClause = null;
-      let attributes = ["*"];
-
-      if (lat && lng && radius) {
-        attributes = [
-          "*",
-          [
-            sequelize.literal(`
-              (6371 * acos(cos(radians(${lat})) 
-              * cos(radians(latitude)) 
-              * cos(radians(longitude) - radians(${lng})) 
-              + sin(radians(${lat})) 
-              * sin(radians(latitude))))
-            `),
-            "distance",
-          ],
-        ];
-        havingClause = sequelize.literal(`distance <= ${radius}`);
-      }
-
-      const { count, rows: restaurants } = await Restaurant.findAndCountAll({
-        where: whereClause,
-        attributes,
-        having: havingClause,
+      const restaurant = await Restaurant.findOne({
+        where: { ownerId },
         include: [
           {
-            model: Item,
-            as: "items",
-            where: { isAvailable: true },
-            required: false,
-            limit: 3,
-            order: [
-              ["isPopular", "DESC"],
-              ["rating", "DESC"],
-            ],
+            model: RestaurantStats,
+            as: "stats",
+            order: [["date", "DESC"]],
           },
         ],
-        limit: Math.min(parseInt(limit), 50),
-        offset: (parseInt(page) - 1) * parseInt(limit),
-        order:
-          lat && lng
-            ? [["distance", "ASC"]]
-            : [[sortBy, sortOrder.toUpperCase()]],
       });
 
-      const restaurantsWithCalculatedFields = restaurants.map((restaurant) => {
-        const restaurantData = restaurant.toSafeJSON();
-        restaurantData.isOpenNow = restaurant.isOpenNow();
-        if (restaurant.dataValues.distance) {
-          restaurantData.distance = parseFloat(restaurant.dataValues.distance);
-        }
-        return restaurantData;
-      });
+      if (!restaurant) {
+        return res.status(404).json({
+          success: false,
+          error: "Restaurant not found",
+          message: "No restaurant found for your account",
+        });
+      }
+
+      const stats = restaurant.stats.map((stat) => stat.toJSON());
 
       res.json({
         success: true,
-        restaurants: restaurantsWithCalculatedFields,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(count / parseInt(limit)),
-          totalCount: count,
-          hasNextPage: parseInt(page) < Math.ceil(count / parseInt(limit)),
-          hasPrevPage: parseInt(page) > 1,
-          limit: parseInt(limit),
-        },
-        filters: {
-          query: q,
-          city,
-          cuisineType,
-          isOpen,
-          minRating,
-          maxDeliveryFee,
-          location: lat && lng ? { lat, lng, radius } : null,
-        },
+        statistics: stats,
       });
     } catch (error) {
       next(error);
     }
   }
-
-  // Get popular restaurants
-  static async getPopularRestaurants(req, res, next) {
-    try {
-      const { city, limit = 10 } = req.query;
-
-      const whereClause = {
-        isActive: true,
-        isOpen: true,
-        rating: { [Op.gte]: 4.0 },
-      };
-
-      if (city) whereClause.city = city;
-
-      const restaurants = await Restaurant.findAll({
-        where: whereClause,
-        include: [
-          {
-            model: Item,
-            as: "items",
-            where: { isPopular: true },
-            required: false,
-            limit: 3,
-          },
-        ],
-        order: [
-          ["rating", "DESC"],
-          ["reviewCount", "DESC"],
-        ],
-        limit: parseInt(limit),
-      });
-
-      const restaurantsWithStatus = restaurants.map((restaurant) => {
-        const restaurantData = restaurant.toSafeJSON();
-        restaurantData.isOpenNow = restaurant.isOpenNow();
-        return restaurantData;
-      });
-
-      res.json({
-        success: true,
-        restaurants: restaurantsWithStatus,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
+  
   // Toggle restaurant status (open/closed)
   static async toggleStatus(req, res, next) {
     try {
-      const ownerId = req.user?.uuid || req.headers["x-user-id"];
+      const ownerId = RestaurantController.getUserID(req);
       const { isOpen } = req.body;
 
       const restaurant = await Restaurant.findOne({ where: { ownerId } });
@@ -410,138 +526,6 @@ class RestaurantController {
           restaurant.isOpen ? "opened" : "closed"
         } successfully`,
         isOpen: restaurant.isOpen,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  // Get restaurant statistics
-  static async getStatistics(req, res, next) {
-    try {
-      const ownerId = req.user?.uuid || req.headers["x-user-id"];
-      const { startDate, endDate, period = "daily" } = req.query;
-
-      const restaurant = await Restaurant.findOne({ where: { ownerId } });
-
-      if (!restaurant) {
-        return res.status(404).json({
-          success: false,
-          error: "Restaurant not found",
-        });
-      }
-
-      const whereClause = { restaurantId: restaurant.id };
-
-      if (startDate && endDate) {
-        whereClause.date = {
-          [Op.between]: [startDate, endDate],
-        };
-      } else {
-        // Default to last 30 days
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        whereClause.date = {
-          [Op.gte]: thirtyDaysAgo,
-        };
-      }
-
-      const stats = await RestaurantStats.findAll({
-        where: whereClause,
-        order: [["date", "ASC"]],
-      });
-
-      // Calculate summary statistics
-      const summary = stats.reduce(
-        (acc, stat) => {
-          acc.totalOrders += stat.totalOrders;
-          acc.totalRevenue += parseFloat(stat.totalRevenue);
-          acc.totalItems += stat.itemsSold;
-          acc.totalCustomers += stat.newCustomers + stat.returningCustomers;
-          return acc;
-        },
-        {
-          totalOrders: 0,
-          totalRevenue: 0,
-          totalItems: 0,
-          totalCustomers: 0,
-        }
-      );
-
-      summary.averageOrderValue =
-        summary.totalOrders > 0
-          ? (summary.totalRevenue / summary.totalOrders).toFixed(2)
-          : 0;
-
-      res.json({
-        success: true,
-        statistics: {
-          summary,
-          daily: stats,
-          period: {
-            startDate: startDate || stats[0]?.date,
-            endDate: endDate || stats[stats.length - 1]?.date,
-            totalDays: stats.length,
-          },
-        },
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  // Get nearby restaurants
-  static async getNearbyRestaurants(req, res, next) {
-    try {
-      const { lat, lng, radius = 5, limit = 20 } = req.query;
-
-      if (!lat || !lng) {
-        return res.status(400).json({
-          success: false,
-          error: "Validation Error",
-          message: "Latitude and longitude are required",
-        });
-      }
-
-      const restaurants = await Restaurant.findAll({
-        where: {
-          isActive: true,
-          latitude: { [Op.ne]: null },
-          longitude: { [Op.ne]: null },
-        },
-        attributes: [
-          "*",
-          [
-            sequelize.literal(`
-              (6371 * acos(cos(radians(${lat})) 
-              * cos(radians(latitude)) 
-              * cos(radians(longitude) - radians(${lng})) 
-              + sin(radians(${lat})) 
-              * sin(radians(latitude))))
-            `),
-            "distance",
-          ],
-        ],
-        having: sequelize.literal(`distance <= ${radius}`),
-        order: [["distance", "ASC"]],
-        limit: parseInt(limit),
-      });
-
-      const restaurantsWithDistance = restaurants.map((restaurant) => {
-        const restaurantData = restaurant.toSafeJSON();
-        restaurantData.distance = parseFloat(restaurant.dataValues.distance);
-        restaurantData.isOpenNow = restaurant.isOpenNow();
-        return restaurantData;
-      });
-
-      res.json({
-        success: true,
-        restaurants: restaurantsWithDistance,
-        searchCriteria: {
-          latitude: parseFloat(lat),
-          longitude: parseFloat(lng),
-          radius: parseFloat(radius),
-        },
       });
     } catch (error) {
       next(error);

@@ -1,188 +1,272 @@
 const Joi = require("joi");
 
+// Custom messages for better frontend communication
+const customMessages = {
+  "any.required": "{#label} is required",
+  "string.empty": "{#label} cannot be empty",
+  "string.min": "{#label} must be at least {#limit} characters",
+  "string.max": "{#label} cannot exceed {#limit} characters",
+  "number.base": "{#label} must be a valid number",
+  "number.min": "{#label} must be at least {#limit}",
+  "number.max": "{#label} cannot exceed {#limit}",
+  "number.positive": "{#label} must be positive",
+  "array.max": "{#label} can have maximum {#limit} items",
+  "boolean.base": "{#label} must be true or false",
+};
+
 const itemValidation = Joi.object({
-  categoryId: Joi.number().integer().positive().optional().messages({
-    "number.positive": "Category ID must be a positive number",
-  }),
-  name: Joi.string().min(2).max(100).required().messages({
-    "string.min": "Item name must be at least 2 characters long",
-    "string.max": "Item name cannot exceed 100 characters",
-    "any.required": "Item name is required",
-  }),
-  description: Joi.string().max(1000).optional().messages({
-    "string.max": "Description cannot exceed 1000 characters",
-  }),
-  price: Joi.number().min(0).max(1000).precision(2).required().messages({
-    "number.min": "Price cannot be negative",
-    "number.max": "Price cannot exceed 1000",
-    "any.required": "Price is required",
-  }),
+  // Required fields
+  categoryId: Joi.number().integer().positive().required().label("Category"),
+
+  name: Joi.string().trim().min(2).max(100).required().label("Item name"),
+
+  price: Joi.number()
+    .min(0.01)
+    .max(999.99)
+    .precision(2)
+    .required()
+    .label("Price"),
+
+  // Optional fields with simple validation
+  description: Joi.string()
+    .trim()
+    .max(500)
+    .allow("")
+    .optional()
+    .label("Description"),
+
   originalPrice: Joi.number()
-    .min(0)
-    .max(1000)
+    .min(0.01)
+    .max(999.99)
     .precision(2)
     .optional()
-    .messages({
-      "number.min": "Original price cannot be negative",
-      "number.max": "Original price cannot exceed 1000",
-    }),
+    .label("Original price"),
+
+  isAvailable: Joi.boolean().default(true).optional().label("Availability"),
+
+  isPopular: Joi.boolean().default(false).optional().label("Popular status"),
+
   preparationTime: Joi.number()
-    .min(5)
-    .max(120)
+    .integer()
+    .min(0)
+    .max(180)
     .default(15)
     .optional()
-    .messages({
-      "number.min": "Preparation time must be at least 5 minutes",
-      "number.max": "Preparation time cannot exceed 120 minutes",
-    }),
-  calories: Joi.number().min(0).max(5000).optional().messages({
-    "number.min": "Calories cannot be negative",
-    "number.max": "Calories cannot exceed 5000",
-  }),
+    .label("Preparation time"),
+
+  // Simple arrays
+  ingredients: Joi.array()
+    .items(Joi.string().trim().min(1).max(50))
+    .max(20)
+    .default([])
+    .optional()
+    .label("Ingredients"),
+
   allergens: Joi.array()
     .items(
       Joi.string().valid(
         "gluten",
         "dairy",
         "eggs",
-        "fish",
-        "shellfish",
-        "tree_nuts",
+        "nuts",
         "peanuts",
         "soy",
-        "sesame",
-        "sulfites",
-        "mustard",
-        "celery"
+        "fish",
+        "shellfish",
+        "sesame"
       )
     )
+    .max(10)
+    .default([])
     .optional()
-    .messages({
-      "any.only": "Invalid allergen type",
-    }),
+    .label("Allergens"),
+
+  // Simplified nutritional info
   nutritionalInfo: Joi.object({
-    protein: Joi.number().min(0).optional(),
-    carbohydrates: Joi.number().min(0).optional(),
-    fat: Joi.number().min(0).optional(),
-    fiber: Joi.number().min(0).optional(),
-    sugar: Joi.number().min(0).optional(),
-    sodium: Joi.number().min(0).optional(),
-    cholesterol: Joi.number().min(0).optional(),
-  }).optional(),
+    calories: Joi.number().min(0).max(5000).optional(),
+    protein: Joi.number().min(0).max(200).optional(),
+    carbs: Joi.number().min(0).max(500).optional(),
+    fat: Joi.number().min(0).max(200).optional(),
+  })
+    .default({})
+    .optional()
+    .label("Nutritional information"),
+
+  sortOrder: Joi.number()
+    .integer()
+    .min(0)
+    .default(0)
+    .optional()
+    .label("Sort order"),
+}).messages(customMessages);
+
+const updateItemValidation = Joi.object({
+  // All fields optional for updates
+  categoryId: Joi.number().integer().positive().optional().label("Category"),
+
+  name: Joi.string().trim().min(2).max(100).optional().label("Item name"),
+
+  description: Joi.string()
+    .trim()
+    .max(500)
+    .allow("")
+    .optional()
+    .label("Description"),
+
+  price: Joi.number()
+    .min(0.01)
+    .max(999.99)
+    .precision(2)
+    .optional()
+    .label("Price"),
+
+  originalPrice: Joi.number()
+    .min(0.01)
+    .max(999.99)
+    .precision(2)
+    .optional()
+    .label("Original price"),
+
+  isAvailable: Joi.boolean().optional().label("Availability"),
+
+  isPopular: Joi.boolean().optional().label("Popular status"),
+
+  preparationTime: Joi.number()
+    .integer()
+    .min(0)
+    .max(180)
+    .optional()
+    .label("Preparation time"),
+
   ingredients: Joi.array()
-    .items(
-      Joi.string().max(100).messages({
-        "string.max": "Each ingredient cannot exceed 100 characters",
-      })
-    )
+    .items(Joi.string().trim().min(1).max(50))
     .max(20)
     .optional()
-    .messages({
-      "array.max": "Cannot have more than 20 ingredients",
-    }),
-  images: Joi.array()
+    .label("Ingredients"),
+
+  allergens: Joi.array()
     .items(
-      Joi.string().uri().messages({
-        "string.uri": "Each image must be a valid URL",
-      })
-    )
-    .max(5)
-    .optional()
-    .messages({
-      "array.max": "Cannot have more than 5 images",
-    }),
-  tags: Joi.array()
-    .items(
-      Joi.string().max(30).messages({
-        "string.max": "Each tag cannot exceed 30 characters",
-      })
+      Joi.string().valid(
+        "gluten",
+        "dairy",
+        "eggs",
+        "nuts",
+        "peanuts",
+        "soy",
+        "fish",
+        "shellfish",
+        "sesame"
+      )
     )
     .max(10)
     .optional()
-    .messages({
-      "array.max": "Cannot have more than 10 tags",
-    }),
-  isVegetarian: Joi.boolean().default(false).optional(),
-  isVegan: Joi.boolean().default(false).optional(),
-  isGlutenFree: Joi.boolean().default(false).optional(),
-  isSpicy: Joi.boolean().default(false).optional(),
-  spicyLevel: Joi.number().min(0).max(5).default(0).optional().messages({
-    "number.min": "Spicy level must be between 0 and 5",
-    "number.max": "Spicy level must be between 0 and 5",
-  }),
-  sortOrder: Joi.number().integer().min(0).default(0).optional(),
-});
+    .label("Allergens"),
 
-const updateItemValidation = Joi.object({
-  categoryId: Joi.number().integer().positive().optional(),
-  name: Joi.string().min(2).max(100).optional(),
-  description: Joi.string().max(1000).optional(),
-  price: Joi.number().min(0).max(1000).precision(2).optional(),
-  originalPrice: Joi.number().min(0).max(1000).precision(2).optional(),
-  isAvailable: Joi.boolean().optional(),
-  preparationTime: Joi.number().min(5).max(120).optional(),
-  calories: Joi.number().min(0).max(5000).optional(),
-  allergens: Joi.array()
-    .items(
-      Joi.string().valid(
-        "gluten",
-        "dairy",
-        "eggs",
-        "fish",
-        "shellfish",
-        "tree_nuts",
-        "peanuts",
-        "soy",
-        "sesame",
-        "sulfites",
-        "mustard",
-        "celery"
-      )
-    )
-    .optional(),
   nutritionalInfo: Joi.object({
-    protein: Joi.number().min(0).optional(),
-    carbohydrates: Joi.number().min(0).optional(),
-    fat: Joi.number().min(0).optional(),
-    fiber: Joi.number().min(0).optional(),
-    sugar: Joi.number().min(0).optional(),
-    sodium: Joi.number().min(0).optional(),
-    cholesterol: Joi.number().min(0).optional(),
-  }).optional(),
-  ingredients: Joi.array().items(Joi.string().max(100)).max(20).optional(),
-  images: Joi.array().items(Joi.string().uri()).max(5).optional(),
-  tags: Joi.array().items(Joi.string().max(30)).max(10).optional(),
-  isVegetarian: Joi.boolean().optional(),
-  isVegan: Joi.boolean().optional(),
-  isGlutenFree: Joi.boolean().optional(),
-  isSpicy: Joi.boolean().optional(),
-  spicyLevel: Joi.number().min(0).max(5).optional(),
-  isFeatured: Joi.boolean().optional(),
-  isPopular: Joi.boolean().optional(),
-  sortOrder: Joi.number().integer().min(0).optional(),
-});
+    calories: Joi.number().min(0).max(5000).optional(),
+    protein: Joi.number().min(0).max(200).optional(),
+    carbs: Joi.number().min(0).max(500).optional(),
+    fat: Joi.number().min(0).max(200).optional(),
+  })
+    .optional()
+    .label("Nutritional information"),
 
+  sortOrder: Joi.number().integer().min(0).optional().label("Sort order"),
+
+  // Additional update-specific fields
+  stock: Joi.number()
+    .integer()
+    .min(0)
+    .max(1000)
+    .optional()
+    .label("Stock quantity"),
+}).messages(customMessages);
+
+// Simplified bulk update validation
 const bulkUpdateItemsValidation = Joi.object({
   items: Joi.array()
     .items(
       Joi.object({
-        uuid: Joi.string().uuid().required(),
+        id: Joi.alternatives()
+          .try(
+            Joi.number().integer().positive(),
+            Joi.string().uuid(),
+            Joi.string().min(1)
+          )
+          .required()
+          .label("Item ID"),
+
+        // Only allow simple bulk updates
         isAvailable: Joi.boolean().optional(),
-        price: Joi.number().min(0).max(1000).precision(2).optional(),
+        price: Joi.number().min(0.01).max(999.99).precision(2).optional(),
+        stock: Joi.number().integer().min(0).max(1000).optional(),
         sortOrder: Joi.number().integer().min(0).optional(),
-      })
+      }).min(1) // At least one field to update
     )
     .min(1)
     .max(50)
     .required()
-    .messages({
-      "array.min": "At least one item is required",
-      "array.max": "Cannot update more than 50 items at once",
-    }),
+    .label("Items"),
+}).messages({
+  ...customMessages,
+  "array.min": "At least one item is required",
+  "array.max": "Cannot update more than 50 items at once",
+  "object.min": "At least one field must be provided for update",
 });
+
+// Helper function to format validation errors for frontend
+const formatValidationError = (error) => {
+  if (!error || !error.details) {
+    return {
+      success: false,
+      error: "Validation Error",
+      message: "Invalid data provided",
+      details: [],
+    };
+  }
+
+  const formattedErrors = error.details.map((detail) => ({
+    field: detail.path.join("."),
+    message: detail.message,
+    value: detail.context?.value,
+  }));
+
+  return {
+    success: false,
+    error: "Validation Error",
+    message: `Please fix the following errors: ${formattedErrors
+      .map((e) => e.message)
+      .join(", ")}`,
+    details: formattedErrors,
+    fieldErrors: formattedErrors.reduce((acc, err) => {
+      acc[err.field] = err.message;
+      return acc;
+    }, {}),
+  };
+};
+
+// Validation middleware that returns formatted errors
+const validateItem = (schema) => {
+  return (req, res, next) => {
+    const { error, value } = schema.validate(req.body, {
+      abortEarly: false, // Get all errors, not just the first one
+      stripUnknown: true, // Remove unknown fields
+      convert: true, // Convert types where possible
+    });
+
+    if (error) {
+      return res.status(400).json(formatValidationError(error));
+    }
+
+    req.validatedData = value;
+    next();
+  };
+};
 
 module.exports = {
   itemValidation,
   updateItemValidation,
   bulkUpdateItemsValidation,
+  formatValidationError,
+  validateItem,
 };

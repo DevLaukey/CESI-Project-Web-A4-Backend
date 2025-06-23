@@ -375,7 +375,6 @@ class UserController {
         where: whereClause,
         limit: Math.min(parseInt(limit), 100), // Max 100 per request
         offset: (parseInt(page) - 1) * parseInt(limit),
-        order: [["createdAt", "DESC"]],
       });
 
       res.json({
@@ -718,7 +717,6 @@ class UserController {
         where: whereClause,
         limit: Math.min(parseInt(limit), 50),
         offset: (parseInt(page) - 1) * parseInt(limit),
-        order: [["createdAt", "DESC"]],
       });
 
       res.json({

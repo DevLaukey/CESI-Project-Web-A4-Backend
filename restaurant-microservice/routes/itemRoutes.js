@@ -1,31 +1,8 @@
 const express = require("express");
 const router = express.Router();
+const ItemController = require("../controllers/ItemController");
 
-// Import controller
-let ItemController;
-try {
-  ItemController = require("../controllers/ItemController");
-} catch (error) {
-  console.warn("ItemController not found, using placeholder");
-  ItemController = {
-    searchItems: (req, res) =>
-      res.json({ success: true, message: "Search items placeholder" }),
-    getPopularItems: (req, res) =>
-      res.json({ success: true, message: "Popular items placeholder" }),
-    getPublicRestaurantItems: (req, res) =>
-      res.json({ success: true, message: "Public items placeholder" }),
-    createItem: (req, res) =>
-      res.json({ success: true, message: "Create item placeholder" }),
-    getRestaurantItems: (req, res) =>
-      res.json({ success: true, message: "Restaurant items placeholder" }),
-    updateItem: (req, res) =>
-      res.json({ success: true, message: "Update item placeholder" }),
-    deleteItem: (req, res) =>
-      res.json({ success: true, message: "Delete item placeholder" }),
-    toggleAvailability: (req, res) =>
-      res.json({ success: true, message: "Toggle availability placeholder" }),
-  };
-}
+
 
 // Import auth middleware
 let authMiddleware;
@@ -42,10 +19,7 @@ try {
 // Public routes
 router.get("/search", ItemController.searchItems);
 router.get("/popular", ItemController.getPopularItems);
-router.get(
-  "/restaurant/:restaurantUuid",
-  ItemController.getPublicRestaurantItems
-);
+
 
 // Protected routes
 router.use(authMiddleware);

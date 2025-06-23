@@ -1,282 +1,369 @@
-// scripts/resetDatabase.js
+// scripts/seedCategories.js
 require("dotenv").config();
-const mysql = require("mysql2/promise");
+const { v4: uuidv4 } = require("uuid");
 
-const resetDatabase = async () => {
-  let connection;
+// Import your models - adjust the path based on your project structure
+const { Category } = require("../models");
+
+const defaultCategories = [
+  {
+    id: 1,
+    name: "Pizza",
+    slug: "pizza",
+    description: "Delicious pizzas with various toppings",
+    icon: "🍕",
+    color: "#FF6B6B",
+    isActive: true,
+    sortOrder: 1,
+  },
+  {
+    id: 2,
+    name: "Pasta",
+    slug: "pasta",
+    description: "Fresh pasta dishes and Italian specialties",
+    icon: "🍝",
+    color: "#4ECDC4",
+    isActive: true,
+    sortOrder: 2,
+  },
+  {
+    id: 3,
+    name: "Salads",
+    slug: "salads",
+    description: "Fresh and healthy salad options",
+    icon: "🥗",
+    color: "#95E1D3",
+    isActive: true,
+    sortOrder: 3,
+  },
+  {
+    id: 4,
+    name: "Appetizers",
+    slug: "appetizers",
+    description: "Small plates and starters",
+    icon: "🥨",
+    color: "#F7DC6F",
+    isActive: true,
+    sortOrder: 4,
+  },
+  {
+    id: 5,
+    name: "Desserts",
+    slug: "desserts",
+    description: "Sweet treats and desserts",
+    icon: "🍰",
+    color: "#BB8FCE",
+    isActive: true,
+    sortOrder: 5,
+  },
+  {
+    id: 6,
+    name: "Beverages",
+    slug: "beverages",
+    description: "Refreshing drinks and beverages",
+    icon: "🥤",
+    color: "#85C1E9",
+    isActive: true,
+    sortOrder: 6,
+  },
+  {
+    id: 7,
+    name: "Main Course",
+    slug: "main-course",
+    description: "Hearty main dishes and entrees",
+    icon: "🍖",
+    color: "#F8C471",
+    isActive: true,
+    sortOrder: 7,
+  },
+];
+
+const seedCategories = async () => {
   try {
-    console.log("🔄 Starting complete database reset...");
-    console.log(`📊 Database: ${process.env.DB_NAME}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+    console.log("🌱 Starting categories seeding...");
 
-    // Create connection WITHOUT specifying database
-    connection = await mysql.createConnection({
-      host: process.env.DB_HOST || "localhost",
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER || "root",
-      password: process.env.DB_PASSWORD || "",
+    // Check if categories already exist
+    const existingCategories = await Category.findAll({
+      where: {
+        name: defaultCategories.map((cat) => cat.name),
+      },
     });
 
-    console.log("✅ Connected to MySQL server");
+    if (existingCategories.length > 0) {
+      console.log("⚠️  Some categories already exist:");
+      existingCategories.forEach((cat) => {
+        console.log(`   - ${cat.name} (ID: ${cat.id})`);
+      });
 
-    const databaseName = process.env.DB_NAME || "restaurant_service_dev";
+      const readline = require("readline");
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
 
-    // Drop the entire database
-    console.log("🗑️ Dropping entire database...");
-    await connection.execute(`DROP DATABASE IF EXISTS \`${databaseName}\``);
-    console.log("✅ Database completely removed");
+      const answer = await new Promise((resolve) => {
+        rl.question(
+          "Do you want to continue and skip existing categories? (y/n): ",
+          resolve
+        );
+      });
+      rl.close();
 
-    // Recreate the database
-    console.log("🏗️ Creating new database...");
-    await connection.execute(
-      `CREATE DATABASE \`${databaseName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+      if (answer.toLowerCase() !== "y") {
+        console.log("❌ Seeding cancelled by user");
+        process.exit(0);
+      }
+    }
+
+    // Filter out existing categories
+    const existingNames = existingCategories.map((cat) => cat.name);
+    const categoriesToCreate = defaultCategories.filter(
+      (cat) => !existingNames.includes(cat.name)
     );
-    console.log("✅ Database recreated with proper charset");
 
-    // Close the connection
-    await connection.end();
+    if (categoriesToCreate.length === 0) {
+      console.log("✅ All categories already exist. Nothing to seed.");
+      return;
+    }
 
-    // Now use Sequelize to create tables
-    console.log("🔗 Connecting with Sequelize...");
-    const { sequelize, Category } = require("../models");
+    // Add UUIDs to categories that don't exist
+    const categoriesWithUuids = categoriesToCreate.map((category) => ({
+      ...category,
+      uuid: uuidv4(),
+    }));
 
-    await sequelize.authenticate();
-    console.log("✅ Sequelize connected to fresh database");
+    // Create categories one by one for better error handling
+    const createdCategories = [];
+    for (const categoryData of categoriesWithUuids) {
+      try {
+        const category = await Category.create(categoryData);
+        createdCategories.push(category);
+        console.log(`   ✅ Created: ${category.name} (ID: ${category.id})`);
+      } catch (error) {
+        console.error(
+          `   ❌ Failed to create ${categoryData.name}:`,
+          error.message
+        );
+      }
+    }
 
-    // Create all tables
-    console.log("🏗️ Creating all tables...");
-    await sequelize.sync({ force: true });
-    console.log("✅ All tables created successfully");
-
-    // Seed default categories
-    console.log("🌱 Seeding default categories...");
-    await seedDefaultCategories(Category);
-
-    // Create upload directories
-    console.log("📁 Creating upload directories...");
-    createUploadDirectories();
-
-    console.log("🎉 Database reset completed successfully!");
-    console.log("📋 Summary:");
-    console.log("   - Database completely removed and recreated");
-    console.log("   - All tables created fresh");
-    console.log("   - Default categories seeded");
-    console.log("   - Upload directories created");
-
-    await sequelize.close();
-    process.exit(0);
+    console.log(
+      `✅ Successfully created ${createdCategories.length} categories`
+    );
+    console.log("🎉 Categories seeding completed successfully!");
   } catch (error) {
-    console.error("❌ Database reset failed:", error);
-    console.error("Error details:", error.message);
+    console.error("❌ Error seeding categories:", error);
 
-    if (connection) {
-      await connection.end();
+    if (error.name === "SequelizeUniqueConstraintError") {
+      console.error(
+        "   This might be due to duplicate entries. Check your database."
+      );
+    } else if (error.name === "SequelizeConnectionError") {
+      console.error(
+        "   Database connection failed. Check your database configuration."
+      );
     }
 
     process.exit(1);
   }
 };
 
-const seedDefaultCategories = async (CategoryModel) => {
+// Alternative function to reset and reseed all categories
+const resetAndSeedCategories = async () => {
   try {
-    const defaultCategories = [
-      {
-        name: "Appetizers",
-        slug: "appetizers",
-        description: "Starters and small plates to begin your meal",
-        icon: "🥗",
-        color: "#4CAF50",
-        isActive: true,
-        sortOrder: 1,
-      },
-      {
-        name: "Main Courses",
-        slug: "main-courses",
-        description: "Hearty main dishes and entrees",
-        icon: "🍽️",
-        color: "#FF9800",
-        isActive: true,
-        sortOrder: 2,
-      },
-      {
-        name: "Pizza",
-        slug: "pizza",
-        description: "Traditional and specialty pizzas",
-        icon: "🍕",
-        color: "#FFC107",
-        isActive: true,
-        sortOrder: 3,
-      },
-      {
-        name: "Burgers",
-        slug: "burgers",
-        description: "Juicy burgers and sandwiches",
-        icon: "🍔",
-        color: "#607D8B",
-        isActive: true,
-        sortOrder: 4,
-      },
-      {
-        name: "Pasta",
-        slug: "pasta",
-        description: "Fresh pasta dishes and Italian cuisine",
-        icon: "🍝",
-        color: "#9C27B0",
-        isActive: true,
-        sortOrder: 5,
-      },
-      {
-        name: "Salads",
-        slug: "salads",
-        description: "Fresh and healthy salad options",
-        icon: "🥗",
-        color: "#8BC34A",
-        isActive: true,
-        sortOrder: 6,
-      },
-      {
-        name: "Soups",
-        slug: "soups",
-        description: "Warm and comforting soup varieties",
-        icon: "🍲",
-        color: "#FF5722",
-        isActive: true,
-        sortOrder: 7,
-      },
-      {
-        name: "Desserts",
-        slug: "desserts",
-        description: "Sweet treats and desserts",
-        icon: "🍰",
-        color: "#E91E63",
-        isActive: true,
-        sortOrder: 8,
-      },
-      {
-        name: "Beverages",
-        slug: "beverages",
-        description: "Drinks, juices, and beverages",
-        icon: "🥤",
-        color: "#2196F3",
-        isActive: true,
-        sortOrder: 9,
-      },
-      {
-        name: "Sides",
-        slug: "sides",
-        description: "Side dishes and accompaniments",
-        icon: "🍟",
-        color: "#795548",
-        isActive: true,
-        sortOrder: 10,
-      },
-    ];
+    console.log("🔄 Resetting and reseeding categories...");
 
-    for (const categoryData of defaultCategories) {
-      await CategoryModel.create(categoryData);
-      console.log(`   ✅ Created category: ${categoryData.name}`);
+    const readline = require("readline");
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const answer = await new Promise((resolve) => {
+      rl.question(
+        "⚠️  This will DELETE ALL existing categories. Continue? (y/n): ",
+        resolve
+      );
+    });
+    rl.close();
+
+    if (answer.toLowerCase() !== "y") {
+      console.log("❌ Reset cancelled by user");
+      process.exit(0);
     }
 
-    console.log(`✅ Seeded ${defaultCategories.length} default categories`);
+    // Delete all existing categories
+    await Category.destroy({
+      where: {},
+      truncate: true,
+      cascade: true,
+    });
+    console.log("🗑️  Deleted all existing categories");
+
+    // Add UUIDs to all categories
+    const categoriesWithUuids = defaultCategories.map((category) => ({
+      ...category,
+      uuid: uuidv4(),
+    }));
+
+    // Create all categories
+    const createdCategories = [];
+    for (const categoryData of categoriesWithUuids) {
+      try {
+        const category = await Category.create(categoryData);
+        createdCategories.push(category);
+        console.log(`   ✅ Created: ${category.name} (ID: ${category.id})`);
+      } catch (error) {
+        console.error(
+          `   ❌ Failed to create ${categoryData.name}:`,
+          error.message
+        );
+      }
+    }
+
+    console.log(
+      `✅ Successfully created ${createdCategories.length} categories`
+    );
+    console.log("🎉 Categories reset and seeding completed successfully!");
   } catch (error) {
-    console.error("❌ Failed to seed categories:", error.message);
-    throw error;
+    console.error("❌ Error resetting categories:", error);
+    process.exit(1);
   }
 };
 
-const createUploadDirectories = () => {
-  const fs = require("fs");
-  const uploadDirs = [
-    "./uploads",
-    "./uploads/restaurants",
-    "./uploads/items",
-    "./uploads/menus",
-    "./uploads/categories",
-    "./uploads/general",
-    "./uploads/temp",
-  ];
+// Function to list existing categories
+const listCategories = async () => {
+  try {
+    console.log("📋 Listing all categories...");
 
-  uploadDirs.forEach((dir) => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      console.log(`   📁 Created directory: ${dir}`);
-    } else {
-      console.log(`   📁 Directory exists: ${dir}`);
+    const categories = await Category.findAll({
+      order: [
+        ["sortOrder", "ASC"],
+        ["name", "ASC"],
+      ],
+    });
+
+    if (categories.length === 0) {
+      console.log("   No categories found in database");
+      return;
     }
-  });
+
+    console.log(`   Found ${categories.length} categories:`);
+    categories.forEach((category) => {
+      console.log(
+        `   - ${category.name} (ID: ${category.id}, UUID: ${category.uuid}, Active: ${category.isActive})`
+      );
+    });
+  } catch (error) {
+    console.error("❌ Error listing categories:", error);
+    process.exit(1);
+  }
 };
 
-// Allow script to be run with command line arguments
-const args = process.argv.slice(2);
+// Test database connection
+const testConnection = async () => {
+  try {
+    console.log("🔍 Testing database connection...");
 
+    // Import sequelize instance
+    const { sequelize } = require("../models");
+
+    await sequelize.authenticate();
+    console.log("✅ Database connection successful");
+
+    // Test if Category table exists
+    const tableExists = await sequelize.getQueryInterface().showAllTables();
+    const categoryTableExists = tableExists.some(
+      (table) => table.toLowerCase() === "categories" || table === "Categories"
+    );
+
+    if (categoryTableExists) {
+      console.log("✅ Categories table exists");
+    } else {
+      console.log("❌ Categories table does not exist. Run migrations first.");
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error("❌ Database connection failed:", error.message);
+    console.error("   Check your database configuration in .env file");
+    process.exit(1);
+  }
+};
+
+// Main execution
+const main = async () => {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  // Test connection first
+  await testConnection();
+
+  switch (command) {
+    case "seed":
+      await seedCategories();
+      break;
+    case "reset":
+      await resetAndSeedCategories();
+      break;
+    case "list":
+      await listCategories();
+      break;
+    case "test":
+      console.log("✅ Database connection test completed");
+      break;
+    case "help":
+    default:
+      console.log(`
+📚 Categories Seed Script Usage:
+
+  node scripts/seedCategories.js <command>
+
+Commands:
+  seed    - Add default categories (skips existing ones)
+  reset   - Delete all categories and recreate defaults
+  list    - List all existing categories
+  test    - Test database connection
+  help    - Show this help message
+
+Examples:
+  node scripts/seedCategories.js seed
+  node scripts/seedCategories.js reset
+  node scripts/seedCategories.js list
+  node scripts/seedCategories.js test
+
+Environment Variables Required:
+  DB_HOST     - Database host (default: localhost)
+  DB_PORT     - Database port (default: 3306)
+  DB_NAME     - Database name
+  DB_USER     - Database username
+  DB_PASSWORD - Database password
+      `);
+      break;
+  }
+
+  // Close database connection
+  try {
+    const { sequelize } = require("../models");
+    await sequelize.close();
+    console.log("🔌 Database connection closed");
+  } catch (error) {
+    // Ignore closing errors
+  }
+
+  process.exit(0);
+};
+
+// Run if called directly
 if (require.main === module) {
-  console.log("🚀 Restaurant Database Complete Reset Tool");
-  console.log("==========================================");
-
-  // Show command line options
-  if (args.includes("--help")) {
-    console.log("Usage: node scripts/resetDatabase.js [options]");
-    console.log("");
-    console.log("This script will:");
-    console.log("1. Drop the entire database");
-    console.log("2. Recreate it fresh");
-    console.log("3. Create all tables");
-    console.log("4. Seed default categories");
-    console.log("5. Create upload directories");
-    console.log("");
-    console.log("Options:");
-    console.log("  --help            Show this help message");
-    process.exit(0);
-  }
-
-  // Confirm in production
-  if (process.env.NODE_ENV === "production") {
-    console.log(
-      "⚠️  WARNING: You are about to completely DESTROY the PRODUCTION database!"
-    );
-    console.log("This will permanently delete ALL data and cannot be undone.");
-    console.log(
-      'Type "DESTROY_PRODUCTION_DB" to continue, or Ctrl+C to cancel:'
-    );
-
-    const readline = require("readline");
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    rl.question("> ", (answer) => {
-      if (answer === "DESTROY_PRODUCTION_DB") {
-        rl.close();
-        resetDatabase();
-      } else {
-        console.log("❌ Reset cancelled - database is safe");
-        rl.close();
-        process.exit(0);
-      }
-    });
-  } else {
-    // Ask for confirmation in development too
-    console.log("⚠️  This will completely remove and recreate your database.");
-    console.log("All data will be lost. Continue? (y/N)");
-
-    const readline = require("readline");
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    rl.question("> ", (answer) => {
-      if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
-        rl.close();
-        resetDatabase();
-      } else {
-        console.log("❌ Reset cancelled");
-        rl.close();
-        process.exit(0);
-      }
-    });
-  }
+  main().catch((error) => {
+    console.error("❌ Unexpected error:", error);
+    process.exit(1);
+  });
 }
 
-module.exports = resetDatabase;
+module.exports = {
+  seedCategories,
+  resetAndSeedCategories,
+  listCategories,
+  defaultCategories,
+};

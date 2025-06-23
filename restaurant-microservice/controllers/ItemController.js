@@ -1,232 +1,417 @@
-const { Item, Restaurant, Category } = require('../models');
-const { Op } = require('sequelize');
-const { itemValidation, updateItemValidation } = require('../validators/itemValidator');
+const { Item, Restaurant, Category } = require("../models");
+const { Op } = require("sequelize");
+const {
+  itemValidation,
+  updateItemValidation,
+  formatValidationError,
+  validateItem,
+} = require("../validators/itemValidator");
 
 class ItemController {
-  // Create new item
+  // Create new item with improved validation
   static async createItem(req, res, next) {
     try {
-      const { error, value } = itemValidation.validate(req.body);
+      // Use the validation with better error formatting
+      const { error, value } = itemValidation.validate(req.body, {
+        abortEarly: false,
+        stripUnknown: true,
+        convert: true,
+      });
+
       if (error) {
-        return res.status(400).json({
-          success: false,
-          error: 'Validation Error',
-          details: error.details.map(detail => detail.message)
-        });
+        return res.status(400).json(formatValidationError(error));
       }
 
-      const ownerId = req.user?.uuid || req.headers['x-user-id'];
-      
-      // Get restaurant
+      const ownerId = req.user?.uuid || req.headers["x-user-id"];
+
+      // Validate restaurant ownership
       const restaurant = await Restaurant.findOne({ where: { ownerId } });
       if (!restaurant) {
         return res.status(404).json({
           success: false,
-          error: 'Restaurant not found',
-          message: 'No restaurant found for your account'
+          error: "Restaurant not found",
+          message:
+            "No restaurant found for your account. Please set up your restaurant first.",
         });
       }
 
-      const item = await Item.create({
-        restaurantId: restaurant.id,
-        ...value
+      // Validate category exists
+      const category = await Category.findByPk(value.categoryId);
+      if (!category) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid category",
+          message: "The selected category does not exist",
+          fieldErrors: {
+            categoryId: "Please select a valid category",
+          },
+        });
+      }
+
+      // Check for duplicate item name in same restaurant
+      const existingItem = await Item.findOne({
+        where: {
+          restaurantId: restaurant.id,
+          name: value.name.trim(),
+        },
       });
 
+      if (existingItem) {
+        return res.status(400).json({
+          success: false,
+          error: "Duplicate item",
+          message: "An item with this name already exists in your restaurant",
+          fieldErrors: {
+            name: "This item name is already taken",
+          },
+        });
+      }
+
+      // Validate original price is higher than price
+      if (value.originalPrice && value.originalPrice <= value.price) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid pricing",
+          message: "Original price must be higher than the current price",
+          fieldErrors: {
+            originalPrice: "Original price must be higher than current price",
+          },
+        });
+      }
+
+      // Create the item
+      const item = await Item.create({
+        restaurantId: restaurant.id,
+        ...value,
+      });
+
+      // Fetch the created item with category info
       const itemWithCategory = await Item.findByPk(item.id, {
-        include: [{ model: Category, as: 'category' }]
+        include: [{ model: Category, as: "category" }],
       });
 
       res.status(201).json({
         success: true,
-        message: 'Item created successfully',
-        item: itemWithCategory
+        message: "Item created successfully",
+        item: itemWithCategory,
       });
-
     } catch (error) {
+      console.error("Error creating item:", error);
+
+      // Handle specific database errors
+      if (error.name === "SequelizeUniqueConstraintError") {
+        return res.status(400).json({
+          success: false,
+          error: "Duplicate entry",
+          message: "An item with this information already exists",
+        });
+      }
+
+      if (error.name === "SequelizeValidationError") {
+        return res.status(400).json({
+          success: false,
+          error: "Database validation error",
+          message: "The provided data does not meet database requirements",
+        });
+      }
+
       next(error);
     }
   }
 
-  // Get restaurant items
+  // Get restaurant items with better error handling
   static async getRestaurantItems(req, res, next) {
     try {
-      const ownerId = req.user?.uuid || req.headers['x-user-id'];
-      const { categoryId, isAvailable, search, page = 1, limit = 50 } = req.query;
+      const ownerId = req.user?.uuid || req.headers["x-user-id"];
+      const {
+        categoryId,
+        isAvailable,
+        search,
+        q, // Support both 'search' and 'q' parameters
+        page = 1,
+        limit = 50,
+        minPrice,
+        maxPrice,
+        allergens,
+      } = req.query;
+
+      // Validate pagination parameters
+      const validPage = Math.max(1, parseInt(page) || 1);
+      const validLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
 
       const restaurant = await Restaurant.findOne({ where: { ownerId } });
       if (!restaurant) {
         return res.status(404).json({
           success: false,
-          error: 'Restaurant not found'
+          error: "Restaurant not found",
+          message: "No restaurant found for your account",
         });
       }
 
       const whereClause = { restaurantId: restaurant.id };
 
-      if (categoryId) whereClause.categoryId = categoryId;
-      if (isAvailable !== undefined) whereClause.isAvailable = isAvailable === 'true';
-      if (search) {
+      // Apply filters
+      if (categoryId) {
+        const categoryExists = await Category.findByPk(categoryId);
+        if (categoryExists) {
+          whereClause.categoryId = categoryId;
+        }
+      }
+
+      if (isAvailable !== undefined) {
+        whereClause.isAvailable = isAvailable === "true";
+      }
+
+      // Search functionality
+      const searchTerm = search || q;
+      if (searchTerm && searchTerm.trim()) {
         whereClause[Op.or] = [
-          { name: { [Op.like]: `%${search}%` } },
-          { description: { [Op.like]: `%${search}%` } }
+          { name: { [Op.like]: `%${searchTerm.trim()}%` } },
+          { description: { [Op.like]: `%${searchTerm.trim()}%` } },
         ];
       }
 
-      const { count, rows: items } = await Item.findAndCountAll({
-        where: whereClause,
-        include: [{ model: Category, as: 'category' }],
-        order: [['sortOrder', 'ASC'], ['createdAt', 'DESC']],
-        limit: parseInt(limit),
-        offset: (parseInt(page) - 1) * parseInt(limit)
-      });
-
-      res.json({
-        success: true,
-        items,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(count / parseInt(limit)),
-          totalCount: count,
-          limit: parseInt(limit)
-        }
-      });
-
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  // Get public restaurant items (for customers)
-  static async getPublicRestaurantItems(req, res, next) {
-    try {
-      const { restaurantUuid } = req.params;
-      const { categoryId, page = 1, limit = 50 } = req.query;
-
-      const restaurant = await Restaurant.findOne({
-        where: { uuid: restaurantUuid, isActive: true }
-      });
-
-      if (!restaurant) {
-        return res.status(404).json({
-          success: false,
-          error: 'Restaurant not found'
-        });
+      // Price filters
+      if (minPrice && !isNaN(parseFloat(minPrice))) {
+        whereClause.price = {
+          ...whereClause.price,
+          [Op.gte]: parseFloat(minPrice),
+        };
       }
 
-      const whereClause = {
-        restaurantId: restaurant.id,
-        isAvailable: true
-      };
+      if (maxPrice && !isNaN(parseFloat(maxPrice))) {
+        whereClause.price = {
+          ...whereClause.price,
+          [Op.lte]: parseFloat(maxPrice),
+        };
+      }
 
-      if (categoryId) whereClause.categoryId = categoryId;
+      // Allergen filters
+      if (allergens) {
+        const allergenList = allergens
+          .split(",")
+          .map((a) => a.trim())
+          .filter(Boolean);
+        if (allergenList.length > 0) {
+          whereClause.allergens = { [Op.overlap]: allergenList };
+        }
+      }
 
       const { count, rows: items } = await Item.findAndCountAll({
         where: whereClause,
-        include: [{ model: Category, as: 'category' }],
-        order: [
-          ['isFeatured', 'DESC'],
-          ['isPopular', 'DESC'],
-          ['sortOrder', 'ASC'],
-          ['rating', 'DESC']
+        include: [
+          {
+            model: Category,
+            as: "category",
+            attributes: ["id", "name"],
+          },
         ],
-        limit: parseInt(limit),
-        offset: (parseInt(page) - 1) * parseInt(limit)
+        order: [
+          ["sortOrder", "ASC"],
+          ["isPopular", "DESC"],
+        ],
+        limit: validLimit,
+        offset: (validPage - 1) * validLimit,
       });
 
       res.json({
         success: true,
         items,
-        restaurant: {
-          uuid: restaurant.uuid,
-          name: restaurant.name,
-          isOpen: restaurant.isOpen
-        },
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(count / parseInt(limit)),
-          totalCount: count
-        }
+          currentPage: validPage,
+          totalPages: Math.ceil(count / validLimit),
+          totalCount: count,
+          limit: validLimit,
+          hasNextPage: validPage < Math.ceil(count / validLimit),
+          hasPrevPage: validPage > 1,
+        },
+        filters: {
+          categoryId,
+          isAvailable,
+          search: searchTerm,
+          minPrice,
+          maxPrice,
+          allergens,
+        },
       });
-
     } catch (error) {
+      console.error("Error fetching restaurant items:", error);
       next(error);
     }
   }
 
-  // Update item
+  // Update item with better validation
   static async updateItem(req, res, next) {
     try {
       const { itemUuid } = req.params;
-      const { error, value } = updateItemValidation.validate(req.body);
-      
-      if (error) {
+
+      // Validate item UUID format
+      if (!itemUuid || typeof itemUuid !== "string") {
         return res.status(400).json({
           success: false,
-          error: 'Validation Error',
-          details: error.details.map(detail => detail.message)
+          error: "Invalid item ID",
+          message: "Please provide a valid item ID",
         });
       }
 
-      const ownerId = req.user?.uuid || req.headers['x-user-id'];
-      
+      const { error, value } = updateItemValidation.validate(req.body, {
+        abortEarly: false,
+        stripUnknown: true,
+        convert: true,
+      });
+
+      if (error) {
+        return res.status(400).json(formatValidationError(error));
+      }
+
+      const ownerId = req.user?.uuid || req.headers["x-user-id"];
+
       const restaurant = await Restaurant.findOne({ where: { ownerId } });
       if (!restaurant) {
         return res.status(404).json({
           success: false,
-          error: 'Restaurant not found'
+          error: "Restaurant not found",
+          message: "No restaurant found for your account",
         });
       }
 
       const item = await Item.findOne({
-        where: { uuid: itemUuid, restaurantId: restaurant.id }
+        where: {
+          [Op.or]: [
+            { uuid: itemUuid },
+            { id: !isNaN(itemUuid) ? parseInt(itemUuid) : null },
+          ].filter(Boolean),
+          restaurantId: restaurant.id,
+        },
       });
 
       if (!item) {
         return res.status(404).json({
           success: false,
-          error: 'Item not found'
+          error: "Item not found",
+          message:
+            "The item you are trying to update does not exist or does not belong to your restaurant",
         });
+      }
+
+      // Validate category if provided
+      if (value.categoryId) {
+        const category = await Category.findByPk(value.categoryId);
+        if (!category) {
+          return res.status(400).json({
+            success: false,
+            error: "Invalid category",
+            message: "The selected category does not exist",
+            fieldErrors: {
+              categoryId: "Please select a valid category",
+            },
+          });
+        }
+      }
+
+      // Validate pricing if both prices are provided
+      if (value.originalPrice && (value.price || item.price)) {
+        const currentPrice = value.price || item.price;
+        if (value.originalPrice <= currentPrice) {
+          return res.status(400).json({
+            success: false,
+            error: "Invalid pricing",
+            message: "Original price must be higher than the current price",
+            fieldErrors: {
+              originalPrice: "Original price must be higher than current price",
+            },
+          });
+        }
+      }
+
+      // Check for duplicate name if name is being updated
+      if (value.name && value.name !== item.name) {
+        const existingItem = await Item.findOne({
+          where: {
+            restaurantId: restaurant.id,
+            name: value.name.trim(),
+            id: { [Op.ne]: item.id },
+          },
+        });
+
+        if (existingItem) {
+          return res.status(400).json({
+            success: false,
+            error: "Duplicate item name",
+            message: "An item with this name already exists in your restaurant",
+            fieldErrors: {
+              name: "This item name is already taken",
+            },
+          });
+        }
       }
 
       await item.update(value);
 
       const updatedItem = await Item.findByPk(item.id, {
-        include: [{ model: Category, as: 'category' }]
+        include: [{ model: Category, as: "category" }],
       });
 
       res.json({
         success: true,
-        message: 'Item updated successfully',
-        item: updatedItem
+        message: "Item updated successfully",
+        item: updatedItem,
       });
-
     } catch (error) {
+      console.error("Error updating item:", error);
+
+      if (error.name === "SequelizeValidationError") {
+        return res.status(400).json({
+          success: false,
+          error: "Database validation error",
+          message: "The provided data does not meet database requirements",
+        });
+      }
+
       next(error);
     }
   }
 
-  // Delete item
+  // Delete item with better validation
   static async deleteItem(req, res, next) {
     try {
       const { itemUuid } = req.params;
-      const ownerId = req.user?.uuid || req.headers['x-user-id'];
+
+      if (!itemUuid) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid item ID",
+          message: "Please provide a valid item ID",
+        });
+      }
+
+      const ownerId = req.user?.uuid || req.headers["x-user-id"];
 
       const restaurant = await Restaurant.findOne({ where: { ownerId } });
       if (!restaurant) {
         return res.status(404).json({
           success: false,
-          error: 'Restaurant not found'
+          error: "Restaurant not found",
+          message: "No restaurant found for your account",
         });
       }
 
       const item = await Item.findOne({
-        where: { uuid: itemUuid, restaurantId: restaurant.id }
+        where: {
+          [Op.or]: [
+            { uuid: itemUuid },
+            { id: !isNaN(itemUuid) ? parseInt(itemUuid) : null },
+          ].filter(Boolean),
+          restaurantId: restaurant.id,
+        },
       });
 
       if (!item) {
         return res.status(404).json({
           success: false,
-          error: 'Item not found'
+          error: "Item not found",
+          message:
+            "The item you are trying to delete does not exist or does not belong to your restaurant",
         });
       }
 
@@ -234,69 +419,88 @@ class ItemController {
 
       res.json({
         success: true,
-        message: 'Item deleted successfully'
+        message: "Item deleted successfully",
+        deletedItem: {
+          id: item.id,
+          uuid: item.uuid,
+          name: item.name,
+        },
       });
-
     } catch (error) {
+      console.error("Error deleting item:", error);
       next(error);
     }
   }
 
-  // Toggle item availability
+  // Toggle availability with better error handling
   static async toggleAvailability(req, res, next) {
     try {
       const { itemUuid } = req.params;
-      const ownerId = req.user?.uuid || req.headers['x-user-id'];
+      const ownerId = req.user?.uuid || req.headers["x-user-id"];
 
       const restaurant = await Restaurant.findOne({ where: { ownerId } });
       if (!restaurant) {
         return res.status(404).json({
           success: false,
-          error: 'Restaurant not found'
+          error: "Restaurant not found",
+          message: "No restaurant found for your account",
         });
       }
 
       const item = await Item.findOne({
-        where: { uuid: itemUuid, restaurantId: restaurant.id }
+        where: {
+          [Op.or]: [
+            { uuid: itemUuid },
+            { id: !isNaN(itemUuid) ? parseInt(itemUuid) : null },
+          ].filter(Boolean),
+          restaurantId: restaurant.id,
+        },
       });
 
       if (!item) {
         return res.status(404).json({
           success: false,
-          error: 'Item not found'
+          error: "Item not found",
+          message:
+            "The item does not exist or does not belong to your restaurant",
         });
       }
 
-      await item.update({ isAvailable: !item.isAvailable });
+      const newAvailability = !item.isAvailable;
+      await item.update({ isAvailable: newAvailability });
 
       res.json({
         success: true,
-        message: `Item ${item.isAvailable ? 'made available' : 'made unavailable'}`,
+        message: `Item ${
+          newAvailability ? "made available" : "made unavailable"
+        }`,
         item: {
+          id: item.id,
           uuid: item.uuid,
           name: item.name,
-          isAvailable: item.isAvailable
-        }
+          isAvailable: newAvailability,
+        },
       });
-
     } catch (error) {
+      console.error("Error toggling item availability:", error);
       next(error);
     }
   }
 
-  // Get popular items
+  // Additional helper methods...
   static async getPopularItems(req, res, next) {
     try {
       const { restaurantUuid, limit = 10 } = req.query;
+      const validLimit = Math.min(50, Math.max(1, parseInt(limit) || 10));
 
       const whereClause = {
         isAvailable: true,
-        isPopular: true
+        isPopular: true,
       };
 
       if (restaurantUuid) {
         const restaurant = await Restaurant.findOne({
-          where: { uuid: restaurantUuid, isActive: true }
+          where: { uuid: restaurantUuid, isActive: true },
         });
         if (restaurant) {
           whereClause.restaurantId = restaurant.id;
@@ -306,48 +510,59 @@ class ItemController {
       const items = await Item.findAll({
         where: whereClause,
         include: [
-          { model: Category, as: 'category' },
-          { model: Restaurant, as: 'restaurant', attributes: ['uuid', 'name', 'rating'] }
+          { model: Category, as: "category" },
+          {
+            model: Restaurant,
+            as: "restaurant",
+            attributes: ["uuid", "name", "rating"],
+          },
         ],
-        order: [['orderCount', 'DESC'], ['rating', 'DESC']],
-        limit: parseInt(limit)
+        order: [
+          ["orderCount", "DESC"],
+          ["rating", "DESC"],
+        ],
+        limit: validLimit,
       });
 
       res.json({
         success: true,
-        items
+        items,
+        count: items.length,
       });
-
     } catch (error) {
+      console.error("Error fetching popular items:", error);
       next(error);
     }
   }
 
-  // Search items across all restaurants
   static async searchItems(req, res, next) {
     try {
       const { q, city, categoryId, page = 1, limit = 20 } = req.query;
 
-      if (!q || q.length < 2) {
+      if (!q || q.trim().length < 2) {
         return res.status(400).json({
           success: false,
-          error: 'Search query must be at least 2 characters'
+          error: "Invalid search query",
+          message: "Search query must be at least 2 characters long",
         });
       }
 
+      const validPage = Math.max(1, parseInt(page) || 1);
+      const validLimit = Math.min(50, Math.max(1, parseInt(limit) || 20));
+
       const itemWhereClause = {
         isAvailable: true,
-        [Op.or] : [
-          { name: { [Op.like]: `%${q}%` } },
-          { description: { [Op.like]: `%${q}%` } }
-        ]
+        [Op.or]: [
+          { name: { [Op.like]: `%${q.trim()}%` } },
+          { description: { [Op.like]: `%${q.trim()}%` } },
+        ],
       };
 
       if (categoryId) itemWhereClause.categoryId = categoryId;
 
       const restaurantWhereClause = {
         isActive: true,
-        isOpen: true
+        isOpen: true,
       };
 
       if (city) restaurantWhereClause.city = city;
@@ -357,29 +572,40 @@ class ItemController {
         include: [
           {
             model: Restaurant,
-            as: 'restaurant',
+            as: "restaurant",
             where: restaurantWhereClause,
-            attributes: ['uuid', 'name', 'city', 'rating', 'deliveryFee', 'averageDeliveryTime']
+            attributes: [
+              "uuid",
+              "name",
+              "city",
+              "rating",
+              "deliveryFee",
+              "averageDeliveryTime",
+            ],
           },
-          { model: Category, as: 'category' }
+          { model: Category, as: "category" },
         ],
-        order: [['rating', 'DESC'], ['orderCount', 'DESC']],
-        limit: parseInt(limit),
-        offset: (parseInt(page) - 1) * parseInt(limit)
+        order: [
+          ["rating", "DESC"],
+          ["orderCount", "DESC"],
+        ],
+        limit: validLimit,
+        offset: (validPage - 1) * validLimit,
       });
 
       res.json({
         success: true,
         items,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(count / parseInt(limit)),
-          totalCount: count
+          currentPage: validPage,
+          totalPages: Math.ceil(count / validLimit),
+          totalCount: count,
+          limit: validLimit,
         },
-        searchQuery: q
+        searchQuery: q.trim(),
       });
-
     } catch (error) {
+      console.error("Error searching items:", error);
       next(error);
     }
   }

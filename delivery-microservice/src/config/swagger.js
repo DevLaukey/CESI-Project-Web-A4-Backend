@@ -60,11 +60,7 @@ const options = {
               type: "string",
               description: "Customer ID who requested the delivery",
             },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-              description: "Delivery creation timestamp",
-            },
+          
             updatedAt: {
               type: "string",
               format: "date-time",

@@ -128,6 +128,11 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: false,
         field: "is_featured",
       },
+      createdAt: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+        field: "created_at",
+      },
       sortOrder: {
         type: DataTypes.INTEGER,
         defaultValue: 0,
@@ -137,7 +142,6 @@ module.exports = (sequelize, DataTypes) => {
     {
       tableName: "items",
       timestamps: true,
-      createdAt: "created_at",
       updatedAt: "updated_at",
       indexes: [
         { fields: ["restaurant_id"] },
