@@ -174,8 +174,7 @@ const reorderValidation = [
  */
 router.get(
   "/",
-  queryValidation,
-  handleValidationErrors,
+
   CategoryController.getAllCategories
 );
 

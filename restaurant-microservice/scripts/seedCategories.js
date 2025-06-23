@@ -1,386 +1,497 @@
-// scripts/seedCategories.js
-// Independent category seeder script that doesn't rely on models
-
+// seeders/standaloneSeeder.js
 require("dotenv").config();
-const { Sequelize, DataTypes } = require("sequelize");
+const { Sequelize, DataTypes, Op } = require("sequelize");
 const { v4: uuidv4 } = require("uuid");
-const fs = require("fs");
-const path = require("path");
 
-// Database configuration (matching your structure)
-const getDbConfig = () => {
-  // Read SSL certificate if it exists
-  let sslConfig = false;
-  const caCertPath = process.env.DB_SSL_CA_PATH;
-
-  if (caCertPath && fs.existsSync(caCertPath)) {
-    sslConfig = {
-      ca: fs.readFileSync(caCertPath),
-    };
-  }
-
-  const env = process.env.NODE_ENV || "development";
-
-  const configs = {
-    development: {
-      username: process.env.DB_USERNAME,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      dialect: "mysql",
-      dialectOptions: {
-        ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
-      },
-      logging: console.log,
+// Direct database connection
+const sequelize = new Sequelize({
+  host:
+    process.env.DB_HOST || "restaurant-restaurant-10052025.j.aivencloud.com",
+  port: process.env.DB_PORT || 26934,
+  database: process.env.DB_NAME || "restaurant",
+  username: process.env.DB_USER || "avnadmin",
+  password: process.env.DB_PASSWORD,
+  dialect: "mysql",
+  dialectOptions: {
+    ssl: {
+      rejectUnauthorized: false,
     },
-    test: {
-      username: process.env.DB_USERNAME,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME_TEST,
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      dialect: "mysql",
-      dialectOptions: {
-        ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
-      },
-      logging: false,
-    },
-    production: {
-      username: process.env.DB_USERNAME,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT || 3306,
-      dialect: "mysql",
-      dialectOptions: {
-        ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
-        connectTimeout: 60000,
-        acquireTimeout: 60000,
-        timeout: 60000,
-      },
-      logging: false,
-      pool: {
-        max: 20,
-        min: 5,
-        acquire: 60000,
-        idle: 10000,
-      },
-      retry: {
-        match: [
-          /ETIMEDOUT/,
-          /EHOSTUNREACH/,
-          /ECONNRESET/,
-          /ECONNREFUSED/,
-          /ETIMEDOUT/,
-          /ESOCKETTIMEDOUT/,
-          /EHOSTUNREACH/,
-          /EPIPE/,
-          /EAI_AGAIN/,
-          /SequelizeConnectionError/,
-          /SequelizeConnectionRefusedError/,
-          /SequelizeHostNotFoundError/,
-          /SequelizeHostNotReachableError/,
-          /SequelizeInvalidConnectionError/,
-          /SequelizeConnectionTimedOutError/,
-        ],
-        max: 3,
-      },
-    },
-  };
+  },
+  logging: console.log,
+});
 
-  return configs[env];
-};
-
-// Validate environment variables
-const validateEnv = () => {
-  const required = ["DB_USERNAME", "DB_PASSWORD", "DB_NAME", "DB_HOST"];
-  const missing = required.filter((key) => !process.env[key]);
-
-  if (missing.length > 0) {
-    console.error("❌ Missing required environment variables:");
-    missing.forEach((key) => console.error(`   - ${key}`));
-    console.error("\n📝 Create a .env file in your project root with:");
-    console.error("DB_HOST=localhost");
-    console.error("DB_PORT=3306");
-    console.error("DB_NAME=your_database_name");
-    console.error("DB_USERNAME=your_mysql_username");
-    console.error("DB_PASSWORD=your_mysql_password");
-    console.error("DB_SSL_REQUIRE=false");
-    process.exit(1);
-  }
-
-  console.log("✅ Required environment variables found");
-};
-
-// Create Sequelize instance
-const createSequelizeInstance = () => {
-  const config = getDbConfig();
-
-  console.log("🔗 Connecting to database...");
-  console.log(`   Host: ${config.host}`);
-  console.log(`   Port: ${config.port}`);
-  console.log(`   Database: ${config.database}`);
-  console.log(`   Username: ${config.username}`);
-  console.log(`   SSL: ${config.dialectOptions.ssl ? "Enabled" : "Disabled"}`);
-
-  return new Sequelize(
-    config.database,
-    config.username,
-    config.password,
-    config
-  );
-};
-
-// Define Category model independently
-const defineCategoryModel = (sequelize) => {
-  const Category = sequelize.define(
-    "Category",
-    {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true,
-      },
-      uuid: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        unique: true,
-        allowNull: false,
-      },
-      name: {
-        type: DataTypes.STRING(100),
-        allowNull: false,
-        unique: true,
-      },
-      slug: {
-        type: DataTypes.STRING(120),
-        allowNull: true,
-        unique: true,
-      },
-      description: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-      },
-      icon: {
-        type: DataTypes.STRING(10),
-        allowNull: true,
-      },
-      color: {
-        type: DataTypes.STRING(7),
-        allowNull: true,
-        defaultValue: "#000000",
-      },
-      isActive: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-        allowNull: false,
-      },
-      sortOrder: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        allowNull: false,
-      },
-    },
-    {
-      tableName: "Categories",
-      timestamps: true,
-      indexes: [
-        {
-          unique: true,
-          fields: ["name"],
-        },
-        {
-          unique: true,
-          fields: ["slug"],
-        },
-        {
-          fields: ["isActive"],
-        },
-        {
-          fields: ["sortOrder"],
-        },
-      ],
-    }
-  );
-
-  return Category;
-};
-
-// Default categories data
-const defaultCategories = [
+// Define Category model inline
+const Category = sequelize.define(
+  "Category",
   {
-    id: 1,
-    name: "Pizza",
-    slug: "pizza",
-    description: "Delicious pizzas with various toppings",
-    icon: "🍕",
-    color: "#FF6B6B",
-    isActive: true,
-    sortOrder: 1,
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    uuid: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      unique: true,
+      allowNull: false,
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
+    slug: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
+    description: DataTypes.TEXT,
+    icon: DataTypes.STRING,
+    image: DataTypes.STRING,
+    color: DataTypes.STRING(7),
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+      field: "is_active",
+    },
+    sortOrder: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+      field: "sort_order",
+    },
+    parentId: {
+      type: DataTypes.INTEGER,
+      field: "parent_id",
+      references: {
+        model: "categories",
+        key: "id",
+      },
+    },
   },
   {
-    id: 2,
-    name: "Pasta",
-    slug: "pasta",
-    description: "Fresh pasta dishes and Italian specialties",
-    icon: "🍝",
-    color: "#4ECDC4",
-    isActive: true,
-    sortOrder: 2,
-  },
+    tableName: "categories",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  }
+);
+
+// Helper function to create slug from name
+function createSlug(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+// Main categories data
+const mainCategories = [
   {
-    id: 3,
-    name: "Salads",
-    slug: "salads",
-    description: "Fresh and healthy salad options",
+    name: "Appetizers & Starters",
+    description:
+      "Small dishes served before the main course to stimulate appetite",
     icon: "🥗",
-    color: "#95E1D3",
+    color: "#FF6B6B",
+    sortOrder: 1,
     isActive: true,
+  },
+  {
+    name: "Soups & Salads",
+    description: "Fresh salads and warm soups for a light meal",
+    icon: "🥄",
+    color: "#4ECDC4",
+    sortOrder: 2,
+    isActive: true,
+  },
+  {
+    name: "Pizza",
+    description: "Traditional and gourmet pizzas with various toppings",
+    icon: "🍕",
+    color: "#FFE66D",
     sortOrder: 3,
+    isActive: true,
   },
   {
-    id: 4,
-    name: "Appetizers",
-    slug: "appetizers",
-    description: "Small plates and starters",
-    icon: "🥨",
-    color: "#F7DC6F",
-    isActive: true,
+    name: "Pasta & Italian",
+    description: "Classic Italian pasta dishes and specialties",
+    icon: "🍝",
+    color: "#FF8B94",
     sortOrder: 4,
+    isActive: true,
   },
   {
-    id: 5,
-    name: "Desserts",
-    slug: "desserts",
-    description: "Sweet treats and desserts",
-    icon: "🍰",
-    color: "#BB8FCE",
-    isActive: true,
+    name: "Burgers & Sandwiches",
+    description: "Juicy burgers and fresh sandwiches",
+    icon: "🍔",
+    color: "#A8E6CF",
     sortOrder: 5,
-  },
-  {
-    id: 6,
-    name: "Beverages",
-    slug: "beverages",
-    description: "Refreshing drinks and beverages",
-    icon: "🥤",
-    color: "#85C1E9",
     isActive: true,
-    sortOrder: 6,
   },
   {
-    id: 7,
-    name: "Main Course",
-    slug: "main-course",
+    name: "Main Courses",
     description: "Hearty main dishes and entrees",
     icon: "🍖",
-    color: "#F8C471",
+    color: "#B4A7D6",
+    sortOrder: 6,
     isActive: true,
+  },
+  {
+    name: "Seafood",
+    description: "Fresh fish and seafood specialties",
+    icon: "🐟",
+    color: "#87CEEB",
     sortOrder: 7,
+    isActive: true,
+  },
+  {
+    name: "Vegetarian & Vegan",
+    description: "Plant-based dishes for vegetarian and vegan diets",
+    icon: "🥬",
+    color: "#90EE90",
+    sortOrder: 8,
+    isActive: true,
+  },
+  {
+    name: "Asian Cuisine",
+    description: "Authentic Asian dishes and flavors",
+    icon: "🥢",
+    color: "#F4A460",
+    sortOrder: 9,
+    isActive: true,
+  },
+  {
+    name: "Mexican & Latin",
+    description: "Spicy and flavorful Mexican and Latin American dishes",
+    icon: "🌮",
+    color: "#FF7F50",
+    sortOrder: 10,
+    isActive: true,
+  },
+  {
+    name: "Desserts",
+    description: "Sweet treats and desserts to end your meal",
+    icon: "🍰",
+    color: "#FFB6C1",
+    sortOrder: 11,
+    isActive: true,
+  },
+  {
+    name: "Beverages",
+    description: "Hot and cold drinks, juices, and specialty beverages",
+    icon: "🥤",
+    color: "#DDA0DD",
+    sortOrder: 12,
+    isActive: true,
+  },
+  {
+    name: "Coffee & Tea",
+    description: "Premium coffee, tea, and hot beverages",
+    icon: "☕",
+    color: "#D2691E",
+    sortOrder: 13,
+    isActive: true,
+  },
+  {
+    name: "Alcoholic Beverages",
+    description: "Wine, beer, cocktails, and spirits",
+    icon: "🍷",
+    color: "#DC143C",
+    sortOrder: 14,
+    isActive: true,
+  },
+  {
+    name: "Kids Menu",
+    description: "Child-friendly meals and smaller portions",
+    icon: "🧒",
+    color: "#FFE4B5",
+    sortOrder: 15,
+    isActive: true,
   },
 ];
 
-// Test database connection
-const testConnection = async (sequelize, Category) => {
-  try {
-    console.log("🔍 Testing database connection...");
+// Subcategories for more specific categorization
+const subcategoriesData = {
+  Pizza: [
+    { name: "Margherita & Classic", color: "#FFE66D", sortOrder: 1 },
+    { name: "Meat Lovers", color: "#FF6347", sortOrder: 2 },
+    { name: "Vegetarian Pizza", color: "#98FB98", sortOrder: 3 },
+    { name: "Gourmet & Specialty", color: "#DDA0DD", sortOrder: 4 },
+  ],
+  "Pasta & Italian": [
+    { name: "Spaghetti & Long Pasta", color: "#FF8B94", sortOrder: 1 },
+    { name: "Penne & Short Pasta", color: "#F0E68C", sortOrder: 2 },
+    { name: "Lasagna & Baked Pasta", color: "#CD853F", sortOrder: 3 },
+    { name: "Ravioli & Stuffed Pasta", color: "#DEB887", sortOrder: 4 },
+  ],
+  "Asian Cuisine": [
+    { name: "Chinese", color: "#FF6347", sortOrder: 1 },
+    { name: "Japanese & Sushi", color: "#FFB6C1", sortOrder: 2 },
+    { name: "Thai", color: "#98FB98", sortOrder: 3 },
+    { name: "Indian", color: "#F4A460", sortOrder: 4 },
+    { name: "Vietnamese", color: "#87CEEB", sortOrder: 5 },
+  ],
+  "Main Courses": [
+    { name: "Grilled & BBQ", color: "#CD853F", sortOrder: 1 },
+    { name: "Steaks & Beef", color: "#A0522D", sortOrder: 2 },
+    { name: "Chicken & Poultry", color: "#DEB887", sortOrder: 3 },
+    { name: "Pork & Lamb", color: "#D2691E", sortOrder: 4 },
+  ],
+  Desserts: [
+    { name: "Cakes & Pastries", color: "#FFB6C1", sortOrder: 1 },
+    { name: "Ice Cream & Gelato", color: "#E6E6FA", sortOrder: 2 },
+    { name: "Chocolate Desserts", color: "#DEB887", sortOrder: 3 },
+    { name: "Fruit Desserts", color: "#98FB98", sortOrder: 4 },
+  ],
+  Beverages: [
+    { name: "Soft Drinks", color: "#87CEEB", sortOrder: 1 },
+    { name: "Juices & Smoothies", color: "#FFE4B5", sortOrder: 2 },
+    { name: "Energy & Sports Drinks", color: "#F0E68C", sortOrder: 3 },
+    { name: "Water & Sparkling", color: "#E0FFFF", sortOrder: 4 },
+  ],
+  "Appetizers & Starters": [
+    { name: "Dips & Spreads", color: "#DDA0DD", sortOrder: 1 },
+    { name: "Fried Appetizers", color: "#F4A460", sortOrder: 2 },
+    { name: "Cold Appetizers", color: "#87CEEB", sortOrder: 3 },
+    { name: "Cheese & Charcuterie", color: "#FFE4B5", sortOrder: 4 },
+  ],
+};
 
-    await sequelize.authenticate();
-    console.log("✅ Database connection successful");
+class StandaloneCategorySeeder {
+  static async run() {
+    try {
+      console.log("==============================");
+      console.log("🌱 Starting standalone category seeding...");
+      console.log("==============================");
 
-    // Check if Categories table exists
-    const queryInterface = sequelize.getQueryInterface();
-    const tables = await queryInterface.showAllTables();
+      // Check environment variables
+      console.log("✅ Required environment variables:");
+      console.log("   DB_HOST:", process.env.DB_HOST || "Using default");
+      console.log("   DB_PORT:", process.env.DB_PORT || "Using default");
+      console.log("   DB_NAME:", process.env.DB_NAME || "Using default");
+      console.log("   DB_USER:", process.env.DB_USER || "Using default");
+      console.log(
+        "   DB_PASSWORD:",
+        process.env.DB_PASSWORD ? "***" : "NOT SET"
+      );
 
-    const categoryTableExists = tables.some(
-      (table) => table.toLowerCase() === "categories" || table === "Categories"
-    );
+      // Test database connection
+      console.log("🔗 Testing database connection...");
+      await sequelize.authenticate();
+      console.log("✅ Database connection successful");
 
-    if (categoryTableExists) {
+      // Check if categories table exists
+      const tables = await sequelize.query("SHOW TABLES LIKE 'categories'");
+      if (tables[0].length === 0) {
+        console.log("❌ Categories table does not exist");
+        console.log(
+          "Please run migrations first to create the categories table"
+        );
+        return;
+      }
       console.log("✅ Categories table exists");
 
-      // Test if we can query the table
-      try {
-        const count = await Category.count();
-        console.log(`📊 Current categories count: ${count}`);
-        return true;
-      } catch (error) {
-        console.log("⚠️  Categories table exists but has structure issues");
-        console.log("   This might be due to schema differences");
-        return false;
+      // Check current categories count
+      const existingCount = await Category.count();
+      console.log(`📊 Current categories count: ${existingCount}`);
+
+      const createdCategories = [];
+      const createdSubcategories = [];
+
+      // Create main categories
+      console.log("🏗️  Creating main categories...");
+      for (const categoryData of mainCategories) {
+        const slug = createSlug(categoryData.name);
+
+        // Check if category already exists
+        const existingCategory = await Category.findOne({
+          where: { name: categoryData.name },
+        });
+
+        if (existingCategory) {
+          console.log(
+            `⚠️  Category '${categoryData.name}' already exists (ID: ${existingCategory.id}), skipping...`
+          );
+          createdCategories.push(existingCategory);
+          continue;
+        }
+
+        try {
+          const category = await Category.create({
+            uuid: uuidv4(),
+            name: categoryData.name,
+            slug: slug,
+            description: categoryData.description,
+            icon: categoryData.icon,
+            color: categoryData.color,
+            sortOrder: categoryData.sortOrder,
+            isActive: categoryData.isActive,
+            parentId: null, // Main category has no parent
+          });
+
+          createdCategories.push(category);
+          console.log(
+            `✅ Created main category: ${category.name} (ID: ${category.id})`
+          );
+        } catch (error) {
+          console.error(
+            `❌ Failed to create category '${categoryData.name}':`,
+            error.message
+          );
+          if (error.name === "SequelizeUniqueConstraintError") {
+            console.error(
+              `   Constraint violation: ${error.errors
+                .map((e) => e.message)
+                .join(", ")}`
+            );
+          }
+        }
       }
-    } else {
-      console.log("❌ Categories table does not exist");
-      return false;
-    }
-  } catch (error) {
-    console.error("❌ Database connection failed:", error.message);
 
-    if (error.original?.code === "ER_ACCESS_DENIED_ERROR") {
-      console.error("   Check your database username and password");
-    } else if (error.original?.code === "ECONNREFUSED") {
-      console.error(
-        "   Check if MySQL server is running and host/port are correct"
-      );
-    } else if (error.original?.code === "ER_BAD_DB_ERROR") {
-      console.error(
-        "   Database does not exist. Create it first or check DB_NAME"
-      );
-    }
-
-    throw error;
-  }
-};
-
-// Create Categories table if it doesn't exist
-const ensureCategoriesTable = async (sequelize, Category) => {
-  try {
-    console.log("🏗️  Ensuring Categories table exists...");
-
-    await Category.sync({ alter: false });
-    console.log("✅ Categories table ready");
-  } catch (error) {
-    console.error("❌ Failed to create/sync Categories table:", error.message);
-    throw error;
-  }
-};
-
-// Seed categories function
-const seedCategories = async () => {
-  let sequelize;
-
-  try {
-    console.log("🌱 Starting independent categories seeding...");
-
-    // Validate environment
-    validateEnv();
-
-    // Create database connection
-    sequelize = createSequelizeInstance();
-
-    // Define Category model
-    const Category = defineCategoryModel(sequelize);
-
-    // Test connection
-    const tableReady = await testConnection(sequelize, Category);
-
-    if (!tableReady) {
-      await ensureCategoriesTable(sequelize, Category);
-    }
-
-    // Check existing categories
-    const existingCategories = await Category.findAll({
-      where: {
-        name: defaultCategories.map((cat) => cat.name),
-      },
-    });
-
-    if (existingCategories.length > 0) {
-      console.log("⚠️  Some categories already exist:");
-      existingCategories.forEach((cat) => {
-        console.log(`   - ${cat.name} (ID: ${cat.id})`);
+      // Ask user if they want to create subcategories
+      const readline = require("readline");
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
       });
+
+      const createSubcategories = await new Promise((resolve) => {
+        rl.question(
+          "Do you want to create subcategories as well? (y/n): ",
+          (answer) => {
+            resolve(
+              answer.toLowerCase() === "y" || answer.toLowerCase() === "yes"
+            );
+          }
+        );
+      });
+
+      rl.close();
+
+      if (createSubcategories) {
+        // Create subcategories
+        console.log("🏗️  Creating subcategories...");
+        for (const [parentName, subcategories] of Object.entries(
+          subcategoriesData
+        )) {
+          const parentCategory = createdCategories.find(
+            (cat) => cat.name === parentName
+          );
+
+          if (!parentCategory) {
+            console.log(
+              `⚠️  Parent category '${parentName}' not found, skipping subcategories...`
+            );
+            continue;
+          }
+
+          for (const subCatData of subcategories) {
+            const fullName = `${parentName} - ${subCatData.name}`;
+            const slug = createSlug(fullName);
+
+            // Check if subcategory already exists
+            const existingSubcategory = await Category.findOne({
+              where: { name: fullName },
+            });
+
+            if (existingSubcategory) {
+              console.log(
+                `⚠️  Subcategory '${fullName}' already exists, skipping...`
+              );
+              continue;
+            }
+
+            try {
+              const subcategory = await Category.create({
+                uuid: uuidv4(),
+                name: fullName,
+                slug: slug,
+                description: `${subCatData.name} under ${parentName} category`,
+                icon: parentCategory.icon, // Inherit parent icon
+                color: subCatData.color,
+                sortOrder: subCatData.sortOrder,
+                isActive: true,
+                parentId: parentCategory.id, // Set parent relationship
+              });
+
+              createdSubcategories.push(subcategory);
+              console.log(
+                `✅ Created subcategory: ${subcategory.name} (ID: ${subcategory.id}, Parent: ${parentCategory.name})`
+              );
+            } catch (error) {
+              console.error(
+                `❌ Failed to create subcategory '${fullName}':`,
+                error.message
+              );
+            }
+          }
+        }
+      } else {
+        console.log("⏭️  Skipping subcategories creation");
+      }
+
+      // Final count and summary
+      const finalCount = await Category.count();
+      const newCategories = finalCount - existingCount;
+
+      console.log("==============================");
+      console.log("🎉 Category seeding completed!");
+      console.log("==============================");
+      console.log(`📈 Created ${newCategories} new categories`);
+      console.log(`📊 Total categories in database: ${finalCount}`);
+      console.log(`🏷️  Main categories processed: ${createdCategories.length}`);
+      if (createSubcategories) {
+        console.log(
+          `🏷️  Subcategories created: ${createdSubcategories.length}`
+        );
+      }
+
+      // Show summary of all categories
+      if (finalCount > 0) {
+        console.log("\n📋 Current categories in database:");
+        const allCategories = await Category.findAll({
+          order: [
+            ["sortOrder", "ASC"],
+            ["name", "ASC"],
+          ],
+        });
+
+        allCategories.forEach((cat) => {
+          const prefix = cat.parentId ? "   ↳" : "📁";
+          console.log(
+            `${prefix} ${cat.name} (ID: ${cat.id}, Active: ${cat.isActive})`
+          );
+        });
+      }
+
+      return {
+        success: true,
+        created: newCategories,
+        total: finalCount,
+        mainCategories: createdCategories.length,
+        subcategories: createdSubcategories.length,
+      };
+    } catch (error) {
+      console.error("==============================");
+      console.error("❌ Category seeding failed:");
+      console.error("==============================");
+      console.error("Error name:", error.name);
+      console.error("Error message:", error.message);
+      if (error.sql) {
+        console.error("SQL query:", error.sql);
+      }
+      if (error.parent) {
+        console.error("Parent error:", error.parent);
+      }
+      throw error;
+    }
+  }
+
+  // Method to clear all categories (use with caution!)
+  static async clear() {
+    try {
+      console.log("==============================");
+      console.log("🗑️  CLEARING ALL CATEGORIES");
+      console.log("==============================");
 
       const readline = require("readline");
       const rl = readline.createInterface({
@@ -388,306 +499,135 @@ const seedCategories = async () => {
         output: process.stdout,
       });
 
-      const answer = await new Promise((resolve) => {
+      const confirmed = await new Promise((resolve) => {
         rl.question(
-          "Do you want to continue and skip existing categories? (y/n): ",
-          resolve
+          '⚠️  This will DELETE ALL CATEGORIES! Are you sure? (type "DELETE" to confirm): ',
+          (answer) => {
+            resolve(answer === "DELETE");
+          }
         );
       });
+
       rl.close();
 
-      if (answer.toLowerCase() !== "y") {
-        console.log("❌ Seeding cancelled by user");
-        process.exit(0);
+      if (!confirmed) {
+        console.log("❌ Operation cancelled");
+        return;
       }
+
+      await sequelize.authenticate();
+
+      // Delete subcategories first (due to foreign key constraints)
+      const subcategoriesDeleted = await Category.destroy({
+        where: { parentId: { [Op.ne]: null } },
+      });
+
+      // Then delete main categories
+      const mainCategoriesDeleted = await Category.destroy({
+        where: { parentId: null },
+      });
+
+      console.log(`🗑️  Deleted ${subcategoriesDeleted} subcategories`);
+      console.log(`🗑️  Deleted ${mainCategoriesDeleted} main categories`);
+      console.log("✅ All categories cleared successfully");
+
+      return {
+        subcategoriesDeleted,
+        mainCategoriesDeleted,
+        total: subcategoriesDeleted + mainCategoriesDeleted,
+      };
+    } catch (error) {
+      console.error("❌ Failed to clear categories:", error);
+      throw error;
     }
+  }
 
-    // Filter out existing categories
-    const existingNames = existingCategories.map((cat) => cat.name);
-    const categoriesToCreate = defaultCategories.filter(
-      (cat) => !existingNames.includes(cat.name)
-    );
+  // Method to test database connection and show table info
+  static async test() {
+    try {
+      console.log("==============================");
+      console.log("🧪 Testing database connection and table structure");
+      console.log("==============================");
 
-    if (categoriesToCreate.length === 0) {
-      console.log("✅ All categories already exist. Nothing to seed.");
-      return;
-    }
+      await sequelize.authenticate();
+      console.log("✅ Database connection successful");
 
-    // Add UUIDs and create categories
-    const createdCategories = [];
-    for (const categoryData of categoriesToCreate) {
-      try {
-        const categoryWithUuid = {
-          ...categoryData,
-          uuid: uuidv4(),
-        };
-
-        const category = await Category.create(categoryWithUuid);
-        createdCategories.push(category);
+      // Show table structure
+      const [tableInfo] = await sequelize.query("DESCRIBE categories");
+      console.log("\n📋 Categories table structure:");
+      tableInfo.forEach((column) => {
         console.log(
-          `   ✅ Created: ${category.name} (ID: ${category.id}, UUID: ${category.uuid})`
+          `   ${column.Field}: ${column.Type} ${
+            column.Null === "NO" ? "(NOT NULL)" : ""
+          }`
         );
-      } catch (error) {
-        console.error(
-          `   ❌ Failed to create ${categoryData.name}:`,
-          error.message
-        );
+      });
+
+      // Count existing categories
+      const count = await Category.count();
+      console.log(`\n📊 Current categories count: ${count}`);
+
+      if (count > 0) {
+        console.log("\n📋 Existing categories:");
+        const categories = await Category.findAll({
+          limit: 10,
+          order: [["id", "ASC"]],
+        });
+
+        categories.forEach((cat) => {
+          console.log(`   ${cat.id}: ${cat.name} (${cat.slug})`);
+        });
+
+        if (count > 10) {
+          console.log(`   ... and ${count - 10} more`);
+        }
       }
-    }
 
-    console.log(
-      `✅ Successfully created ${createdCategories.length} categories`
-    );
-    console.log("🎉 Categories seeding completed successfully!");
-  } catch (error) {
-    console.error("❌ Error seeding categories:", error.message);
-    process.exit(1);
-  } finally {
-    if (sequelize) {
-      await sequelize.close();
-      console.log("🔌 Database connection closed");
+      console.log("\n✅ Database test completed successfully");
+    } catch (error) {
+      console.error("❌ Database test failed:", error);
+      throw error;
     }
   }
-};
-
-// Reset and seed all categories
-const resetAndSeedCategories = async () => {
-  let sequelize;
-
-  try {
-    console.log("🔄 Resetting and reseeding categories...");
-
-    const readline = require("readline");
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    const answer = await new Promise((resolve) => {
-      rl.question(
-        "⚠️  This will DELETE ALL existing categories. Continue? (y/n): ",
-        resolve
-      );
-    });
-    rl.close();
-
-    if (answer.toLowerCase() !== "y") {
-      console.log("❌ Reset cancelled by user");
-      process.exit(0);
-    }
-
-    // Validate environment
-    validateEnv();
-
-    // Create database connection
-    sequelize = createSequelizeInstance();
-
-    // Define Category model
-    const Category = defineCategoryModel(sequelize);
-
-    // Test connection
-    await testConnection(sequelize, Category);
-
-    // Delete all existing categories
-    await Category.destroy({
-      where: {},
-      truncate: true,
-      cascade: true,
-    });
-    console.log("🗑️  Deleted all existing categories");
-
-    // Create all categories
-    const createdCategories = [];
-    for (const categoryData of defaultCategories) {
-      try {
-        const categoryWithUuid = {
-          ...categoryData,
-          uuid: uuidv4(),
-        };
-
-        const category = await Category.create(categoryWithUuid);
-        createdCategories.push(category);
-        console.log(
-          `   ✅ Created: ${category.name} (ID: ${category.id}, UUID: ${category.uuid})`
-        );
-      } catch (error) {
-        console.error(
-          `   ❌ Failed to create ${categoryData.name}:`,
-          error.message
-        );
-      }
-    }
-
-    console.log(
-      `✅ Successfully created ${createdCategories.length} categories`
-    );
-    console.log("🎉 Categories reset and seeding completed successfully!");
-  } catch (error) {
-    console.error("❌ Error resetting categories:", error.message);
-    process.exit(1);
-  } finally {
-    if (sequelize) {
-      await sequelize.close();
-      console.log("🔌 Database connection closed");
-    }
-  }
-};
-
-// List existing categories
-const listCategories = async () => {
-  let sequelize;
-
-  try {
-    console.log("📋 Listing all categories...");
-
-    // Validate environment
-    validateEnv();
-
-    // Create database connection
-    sequelize = createSequelizeInstance();
-
-    // Define Category model
-    const Category = defineCategoryModel(sequelize);
-
-    // Test connection
-    await testConnection(sequelize, Category);
-
-    const categories = await Category.findAll({
-      order: [
-        ["sortOrder", "ASC"],
-        ["name", "ASC"],
-      ],
-    });
-
-    if (categories.length === 0) {
-      console.log("   No categories found in database");
-      return;
-    }
-
-    console.log(`   Found ${categories.length} categories:`);
-    categories.forEach((category) => {
-      console.log(
-        `   - ${category.name} (ID: ${category.id}, UUID: ${category.uuid}, Active: ${category.isActive})`
-      );
-    });
-  } catch (error) {
-    console.error("❌ Error listing categories:", error.message);
-    process.exit(1);
-  } finally {
-    if (sequelize) {
-      await sequelize.close();
-      console.log("🔌 Database connection closed");
-    }
-  }
-};
-
-// Test database connection only
-const testConnectionOnly = async () => {
-  let sequelize;
-
-  try {
-    console.log("🔍 Testing database connection...");
-
-    // Validate environment
-    validateEnv();
-
-    // Create database connection
-    sequelize = createSequelizeInstance();
-
-    // Define Category model
-    const Category = defineCategoryModel(sequelize);
-
-    // Test connection
-    await testConnection(sequelize, Category);
-
-    console.log("✅ Database connection test completed successfully");
-  } catch (error) {
-    console.error("❌ Database connection test failed:", error.message);
-    process.exit(1);
-  } finally {
-    if (sequelize) {
-      await sequelize.close();
-      console.log("🔌 Database connection closed");
-    }
-  }
-};
-
-// Main execution
-const main = async () => {
-  const args = process.argv.slice(2);
-  const command = args[0];
-
-  console.log("🚀 Independent Category Seeder");
-  console.log("==============================");
-
-  switch (command) {
-    case "seed":
-      await seedCategories();
-      break;
-    case "reset":
-      await resetAndSeedCategories();
-      break;
-    case "list":
-      await listCategories();
-      break;
-    case "test":
-      await testConnectionOnly();
-      break;
-    case "help":
-    default:
-      console.log(`
-📚 Independent Categories Seed Script Usage:
-
-  node scripts/seedCategories.js <command>
-
-Commands:
-  seed    - Add default categories (skips existing ones)
-  reset   - Delete all categories and recreate defaults
-  list    - List all existing categories
-  test    - Test database connection and table structure
-  help    - Show this help message
-
-Examples:
-  node scripts/seedCategories.js seed
-  node scripts/seedCategories.js reset
-  node scripts/seedCategories.js list
-  node scripts/seedCategories.js test
-
-Environment Variables Required:
-  DB_HOST         - Database host (e.g., localhost)
-  DB_PORT         - Database port (e.g., 3306)
-  DB_NAME         - Database name
-  DB_USERNAME     - Database username
-  DB_PASSWORD     - Database password
-  DB_SSL_REQUIRE  - SSL requirement (true/false)
-  DB_SSL_CA_PATH  - SSL CA certificate path (optional)
-
-Categories that will be created:
-  1. Pizza         🍕 - Delicious pizzas with various toppings
-  2. Pasta         🍝 - Fresh pasta dishes and Italian specialties
-  3. Salads        🥗 - Fresh and healthy salad options
-  4. Appetizers    🥨 - Small plates and starters
-  5. Desserts      🍰 - Sweet treats and desserts
-  6. Beverages     🥤 - Refreshing drinks and beverages
-  7. Main Course   🍖 - Hearty main dishes and entrees
-      `);
-      break;
-  }
-
-  process.exit(0);
-};
-
-// Run if called directly
-if (require.main === module) {
-  main().catch((error) => {
-    console.error("❌ Unexpected error:", error);
-    process.exit(1);
-  });
 }
 
-module.exports = {
-  seedCategories,
-  resetAndSeedCategories,
-  listCategories,
-  defaultCategories,
-};
+// Main execution
+async function main() {
+  const args = process.argv.slice(2);
+  const command = args[0] || "seed";
+
+  try {
+    switch (command) {
+      case "seed":
+        await StandaloneCategorySeeder.run();
+        break;
+      case "clear":
+        await StandaloneCategorySeeder.clear();
+        break;
+      case "test":
+        await StandaloneCategorySeeder.test();
+        break;
+      default:
+        console.log("Usage:");
+        console.log("  node standaloneSeeder.js seed   - Seed categories");
+        console.log("  node standaloneSeeder.js clear  - Clear all categories");
+        console.log(
+          "  node standaloneSeeder.js test   - Test database connection"
+        );
+    }
+  } catch (error) {
+    console.error("❌ Operation failed:", error.message);
+    process.exit(1);
+  } finally {
+    await sequelize.close();
+    console.log("🔌 Database connection closed");
+    process.exit(0);
+  }
+}
+
+// Run if this file is executed directly
+if (require.main === module) {
+  main();
+}
+
+module.exports = StandaloneCategorySeeder;

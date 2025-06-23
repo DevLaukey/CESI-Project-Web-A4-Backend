@@ -40,12 +40,6 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: true,
         field: "is_active",
       },
-      createdAt: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW,
-        field: "created_at",
-      },
       sortOrder: {
         type: DataTypes.INTEGER,
         defaultValue: 0,
@@ -63,6 +57,7 @@ module.exports = (sequelize, DataTypes) => {
     {
       tableName: "categories",
       timestamps: true,
+      createdAt: "created_at",
       updatedAt: "updated_at",
       indexes: [
         { fields: ["name"] },
