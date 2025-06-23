@@ -14,7 +14,7 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
       },
       ownerId: {
-        type: DataTypes.STRING, // UUID from User microservice
+        type: DataTypes.STRING,
         allowNull: false,
         field: "owner_id",
       },
@@ -84,6 +84,18 @@ module.exports = (sequelize, DataTypes) => {
           max: 5,
         },
       },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "created_at",
+      },
+      updatedAt: { 
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "updated_at",
+      },
       reviewCount: {
         type: DataTypes.INTEGER,
         defaultValue: 0,
@@ -133,8 +145,10 @@ module.exports = (sequelize, DataTypes) => {
     {
       tableName: "restaurants",
       timestamps: true,
-      createdAt: "created_at",
-      updatedAt: "updated_at",
+      createdAt: "createdAt",
+      updatedAt: "updatedAt",
+      // Alternative: use underscored option
+      // underscored: true,
       indexes: [
         { fields: ["owner_id"] },
         { fields: ["cuisine_type"] },
@@ -166,7 +180,7 @@ module.exports = (sequelize, DataTypes) => {
       as: "reviews",
     });
     Restaurant.belongsToMany(models.Category, {
-      through: models.RestaurantCategories, // Fixed: use the actual model
+      through: models.RestaurantCategories,
       foreignKey: "restaurantId",
       otherKey: "categoryId",
       as: "categories",
@@ -184,8 +198,8 @@ module.exports = (sequelize, DataTypes) => {
     if (!this.isOpen || !this.isActive) return false;
 
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+    const dayOfWeek = now.getDay();
+    const currentTime = now.getHours() * 100 + now.getMinutes();
 
     const openingHours = this.openingHours || {};
     const todayHours = openingHours[dayOfWeek];
@@ -198,7 +212,7 @@ module.exports = (sequelize, DataTypes) => {
   Restaurant.prototype.calculateDistance = function (lat, lng) {
     if (!this.latitude || !this.longitude) return null;
 
-    const R = 6371; // Earth's radius in kilometers
+    const R = 6371;
     const dLat = ((lat - this.latitude) * Math.PI) / 180;
     const dLng = ((lng - this.longitude) * Math.PI) / 180;
     const a =

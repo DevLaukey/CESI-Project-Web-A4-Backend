@@ -1944,10 +1944,7 @@ const options = {
               },
               description: "Restaurant image URLs",
             },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-            },
+          
             updatedAt: {
               type: "string",
               format: "date-time",
@@ -2052,10 +2049,6 @@ const options = {
               description: "Display order within category",
               default: 0,
             },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-            },
             updatedAt: {
               type: "string",
               format: "date-time",
@@ -2130,10 +2123,7 @@ const options = {
               description: "Display order",
               default: 0,
             },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-            },
+           
             updatedAt: {
               type: "string",
               format: "date-time",
@@ -2182,10 +2172,7 @@ const options = {
               description: "Category color code",
               example: "#FF5722",
             },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-            },
+         
             updatedAt: {
               type: "string",
               format: "date-time",
@@ -2265,10 +2252,7 @@ const options = {
                 },
               },
             },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-            },
+          
             updatedAt: {
               type: "string",
               format: "date-time",

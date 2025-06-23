@@ -33,7 +33,6 @@ router.get("/restaurant/:restaurantUuid", async (req, res, next) => {
 
       const { count, rows } = await Review.findAndCountAll({
         where: whereClause,
-        order: [["createdAt", "DESC"]],
         limit: parseInt(limit),
         offset: (parseInt(page) - 1) * parseInt(limit),
       });

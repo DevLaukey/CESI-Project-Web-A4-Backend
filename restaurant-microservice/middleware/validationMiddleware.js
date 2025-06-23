@@ -62,7 +62,6 @@ const validatePagination = validateMiddleware(
   Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
-    sortBy: Joi.string().default("createdAt"),
     sortOrder: Joi.string().valid("ASC", "DESC").default("DESC"),
   }),
   "query"

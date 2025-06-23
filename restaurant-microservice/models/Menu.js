@@ -69,6 +69,12 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.DATE,
         field: "valid_until",
       },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "created_at",
+      },
       sortOrder: {
         type: DataTypes.INTEGER,
         defaultValue: 0,
@@ -78,7 +84,6 @@ module.exports = (sequelize, DataTypes) => {
     {
       tableName: "menus",
       timestamps: true,
-      createdAt: "created_at",
       updatedAt: "updated_at",
       indexes: [
         { fields: ["restaurant_id"] },
