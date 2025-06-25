@@ -1,433 +1,211 @@
+// orderController.js
 const Order = require("../models/Order");
-const OrderItem = require("../models/OrderItem");
-const logger = require("../utils/logger");
-const {
-  validateOrder,
-  validateOrderUpdate,
-} = require("../validators/orderValidator");
-const externalServices = require("../services/externalServices");
 
-class OrderController {
-  // Create new order
-  static async createOrder(req, res) {
-    try {
-      // Validate request data
-      const { error, value } = validateOrder(req.body);
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message: "Validation error",
-          errors: error.details.map((detail) => detail.message),
-        });
-      }
+exports.createOrder = async (req, res) => {
+  const { restaurant_id, payment_id, delivery_address, items } = req.body;
+  const uuid = req.user.uuid;
 
-      const { items, ...orderData } = value;
-      orderData.customer_id = req.user.id;
-
-      // Verify restaurant exists
-      const restaurant = await externalServices.getRestaurant(
-        orderData.restaurant_id
-      );
-      if (!restaurant) {
-        return res.status(404).json({
-          success: false,
-          message: "Restaurant not found",
-        });
-      }
-
-      // Verify menu items and calculate totals
-      let subtotal = 0;
-      const verifiedItems = [];
-
-      for (const item of items) {
-        const menuItem = await externalServices.getMenuItem(item.menu_item_id);
-        if (!menuItem) {
-          return res.status(404).json({
-            success: false,
-            message: `Menu item ${item.menu_item_id} not found`,
-          });
-        }
-
-        const itemTotal = menuItem.price * item.quantity;
-        subtotal += itemTotal;
-
-        verifiedItems.push({
-          ...item,
-          unit_price: menuItem.price,
-          total_price: itemTotal,
-        });
-      }
-
-      // Calculate final totals
-      const taxAmount = subtotal * 0.1; // 10% tax
-      const deliveryFee = 5.99; // Fixed delivery fee
-      const totalAmount =
-        subtotal + taxAmount + deliveryFee - (orderData.discount_amount || 0);
-
-      orderData.tax_amount = taxAmount;
-      orderData.delivery_fee = deliveryFee;
-      orderData.total_amount = totalAmount;
-
-      // Create order
-      const order = await Order.create(orderData);
-
-      // Create order items
-      const orderItems = verifiedItems.map((item) => ({
-        ...item,
-        order_id: order.id,
-      }));
-
-      await OrderItem.createBulk(orderItems);
-
-      // Get complete order with items
-      const completeOrder = await this.getCompleteOrder(order.id);
-
-      // Notify restaurant
-      await externalServices.notifyRestaurant(order.restaurant_id, {
-        type: "new_order",
-        order_id: order.id,
-        message: "New order received",
-      });
-
-      logger.info(
-        `Order created: ${order.id} by customer: ${order.customer_id}`
-      );
-
-      res.status(201).json({
-        success: true,
-        message: "Order created successfully",
-        data: completeOrder,
-      });
-    } catch (error) {
-      logger.error("Create order error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
+  if (!restaurant_id || !delivery_address || !items) {
+    return res.status(400).json({ error: "Missing required fields" });
   }
 
-  // Get order by ID
-  static async getOrder(req, res) {
-    try {
-      const { id } = req.params;
-      const order = await this.getCompleteOrder(id);
-
-      if (!order) {
-        return res.status(404).json({
-          success: false,
-          message: "Order not found",
-        });
-      }
-
-      // Check authorization
-      if (!this.canAccessOrder(req.user, order)) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied",
-        });
-      }
-
-      res.json({
-        success: true,
-        data: order,
-      });
-    } catch (error) {
-      logger.error("Get order error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "Items must be a non-empty array" });
   }
 
-  // Update order status
-  static async updateOrderStatus(req, res) {
-    try {
-      const { id } = req.params;
-      const { error, value } = validateOrderUpdate(req.body);
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message: "Validation error",
-          errors: error.details.map((detail) => detail.message),
-        });
-      }
-
-      const order = await Order.findById(id);
-      if (!order) {
-        return res.status(404).json({
-          success: false,
-          message: "Order not found",
-        });
-      }
-
-      // Check authorization
-      if (!this.canUpdateOrder(req.user, order, value.status)) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied",
-        });
-      }
-
-      // Update order
-      const additionalData = {};
-      if (value.status === "delivered") {
-        additionalData.actual_delivery_time = new Date();
-      }
-      if (value.driver_id) {
-        additionalData.driver_id = value.driver_id;
-      }
-
-      const updatedOrder = await Order.updateStatus(
-        id,
-        value.status,
-        additionalData
-      );
-
-      // Send notifications
-      await this.sendStatusNotification(updatedOrder);
-
-      res.json({
-        success: true,
-        message: "Order status updated successfully",
-        data: updatedOrder,
-      });
-    } catch (error) {
-      logger.error("Update order status error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
+  // Validate each item has item_id, quantity (number), price (number):
+  const missingPrice = items.some(
+    (item) =>
+      !item.item_id ||
+      typeof item.quantity !== "number" ||
+      typeof item.price !== "number"
+  );
+  if (missingPrice) {
+    return res
+      .status(400)
+      .json({ error: "Each item must include item_id, quantity, and price" });
   }
 
-  // Get order history
-  static async getOrderHistory(req, res) {
-    try {
-      const { page = 1, limit = 20 } = req.query;
-      const offset = (page - 1) * limit;
-
-      let orders;
-      if (req.user.role === "customer") {
-        orders = await Order.findByCustomer(
-          req.user.id,
-          parseInt(limit),
-          offset
-        );
-      } else if (req.user.role === "restaurant") {
-        orders = await Order.findByRestaurant(
-          req.user.restaurant_id,
-          parseInt(limit),
-          offset
-        );
-      } else if (req.user.role === "driver") {
-        orders = await Order.findByDriver(req.user.id, parseInt(limit), offset);
-      } else {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied",
-        });
+  try {
+    // Only check uniqueness if payment_id provided and non-empty:
+    if (payment_id) {
+      const existing = await Order.findOne({ where: { payment_id } });
+      if (existing) {
+        return res
+          .status(409)
+          .json({ error: "Order already exists for this payment" });
       }
-
-      res.json({
-        success: true,
-        data: orders,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: orders.length,
-        },
-      });
-    } catch (error) {
-      logger.error("Get order history error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
     }
-  }
-
-  // Get order statistics
-  static async getOrderStats(req, res) {
-    try {
-      const { restaurant_id, start_date, end_date } = req.query;
-
-      // Check authorization for restaurant stats
-      if (
-        restaurant_id &&
-        req.user.role === "restaurant" &&
-        req.user.restaurant_id !== restaurant_id
-      ) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied",
-        });
-      }
-
-      const stats = await Order.getOrderStats(
-        restaurant_id,
-        start_date,
-        end_date
-      );
-
-      res.json({
-        success: true,
-        data: stats,
-      });
-    } catch (error) {
-      logger.error("Get order stats error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // Cancel order
-  static async cancelOrder(req, res) {
-    try {
-      const { id } = req.params;
-      const { reason } = req.body;
-
-      const order = await Order.findById(id);
-      if (!order) {
-        return res.status(404).json({
-          success: false,
-          message: "Order not found",
-        });
-      }
-
-      // Check if order can be cancelled
-      if (!["pending", "confirmed"].includes(order.status)) {
-        return res.status(400).json({
-          success: false,
-          message: "Order cannot be cancelled at this stage",
-        });
-      }
-
-      // Check authorization
-      if (!this.canCancelOrder(req.user, order)) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied",
-        });
-      }
-
-      // Cancel order
-      const updatedOrder = await Order.updateStatus(id, "cancelled");
-
-      // Process refund if payment was made
-      if (order.payment_status === "paid") {
-        await externalServices.processRefund(order.id, order.total_amount);
-        await Order.updatePaymentStatus(id, "refunded");
-      }
-
-      // Send notifications
-      await this.sendCancellationNotification(updatedOrder, reason);
-
-      res.json({
-        success: true,
-        message: "Order cancelled successfully",
-        data: updatedOrder,
-      });
-    } catch (error) {
-      logger.error("Cancel order error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // Helper method to get complete order with items
-  static async getCompleteOrder(orderId) {
-    const order = await Order.findById(orderId);
-    if (!order) return null;
-
-    const items = await OrderItem.findByOrder(orderId);
-    return {
-      ...order,
+    // Create order. If payment_id is omitted or null, it will be null in DB.
+    const newOrder = await Order.create({
+      uuid,
+      restaurant_id,
+      payment_id: payment_id || null,
+      delivery_address,
       items,
-    };
+      // status defaults to "pending" per model
+    });
+
+    res.status(201).json({ orderId: newOrder.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to create order" });
+  }
+};
+
+exports.getOrders = async (req, res) => {
+  try {
+    const orders = await Order.findAll();
+    res.json(orders);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch orders" });
+  }
+};
+
+exports.getOrderById = async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+
+  try {
+    const order = await Order.findByPk(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    res.json(order);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch order" });
+  }
+};
+
+exports.getMyOrders = async (req, res) => {
+  const uuid = req.user.uuid;
+
+  try {
+    const orders = await Order.findAll({ where: { uuid } });
+    res.json(orders);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch your orders" });
+  }
+};
+
+exports.getOrdersByRestaurantId = async (req, res) => {
+  const restaurantId = req.params.restaurantId;
+  // assuming restaurant_id is string in model; if numeric, parseInt:
+  // const restaurantIdNum = parseInt(req.params.restaurantId);
+  // if (isNaN(restaurantIdNum)) return res.status(400).json({ error: "Invalid restaurant ID" });
+  try {
+    const orders = await Order.findAll({
+      where: { restaurant_id: restaurantId },
+    });
+    res.json(orders);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch restaurant orders" });
+  }
+};
+
+exports.updateOrderStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const validStatuses = [
+    "pending",
+    "confirmed",
+    "preparing",
+    "out_for_delivery",
+    "delivered",
+    "cancelled",
+  ];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
   }
 
-  // Authorization helpers
-  static canAccessOrder(user, order) {
-    if (user.role === "admin" || user.role === "sales") return true;
-    if (user.role === "customer") return user.id === order.customer_id;
-    if (user.role === "restaurant")
-      return user.restaurant_id === order.restaurant_id;
-    if (user.role === "driver") return user.id === order.driver_id;
-    return false;
+  try {
+    const order = await Order.findByPk(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    order.status = status;
+    await order.save();
+
+    res.json({ message: "Status updated", orderId: id, newStatus: status });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update status" });
+  }
+};
+
+/**
+ * New: update payment_id + status when payment completes.
+ * PATCH /orders/:id/payment
+ * Body: { payment_id: string, status: "confirmed" or "cancelled" }
+ */
+exports.updatePayment = async (req, res) => {
+  const { id } = req.params;
+  const { payment_id, status } = req.body;
+  if (!payment_id) {
+    return res.status(400).json({ error: "payment_id is required" });
+  }
+  // Only allow setting status to confirmed or cancelled here:
+  const allowed = ["confirmed", "cancelled"];
+  if (!allowed.includes(status)) {
+    return res
+      .status(400)
+      .json({ error: `Invalid status; must be one of: ${allowed.join(", ")}` });
   }
 
-  static canUpdateOrder(user, order, newStatus) {
-    if (user.role === "admin") return true;
-    if (user.role === "restaurant") {
-      return (
-        user.restaurant_id === order.restaurant_id &&
-        ["confirmed", "preparing", "ready"].includes(newStatus)
-      );
-    }
-    if (user.role === "driver") {
-      return ["picked_up", "delivered"].includes(newStatus);
-    }
-    return false;
-  }
+  try {
+    const order = await Order.findByPk(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
 
-  static canCancelOrder(user, order) {
-    if (user.role === "admin") return true;
-    if (user.role === "customer") return user.id === order.customer_id;
-    if (user.role === "restaurant")
-      return user.restaurant_id === order.restaurant_id;
-    return false;
-  }
-
-  // Notification helpers
-  static async sendStatusNotification(order) {
-    try {
-      // Notify customer
-      await externalServices.sendNotification(order.customer_id, {
-        type: "order_status_update",
-        order_id: order.id,
-        status: order.status,
-        message: `Your order is now ${order.status}`,
-      });
-
-      // Notify driver if assigned
-      if (order.driver_id && ["ready", "picked_up"].includes(order.status)) {
-        await externalServices.sendNotification(order.driver_id, {
-          type: "delivery_update",
-          order_id: order.id,
-          status: order.status,
+    // If this order already has a non-null payment_id and status beyond pending,
+    // you may decide whether to allow re-update. For simplicity, disallow if already confirmed/cancelled:
+    if (order.payment_id) {
+      // If same payment_id and already same status, just return OK:
+      if (order.payment_id === payment_id && order.status === status) {
+        return res.json({
+          message: "No change; same payment/status",
+          orderId: id,
         });
       }
-    } catch (error) {
-      logger.error("Failed to send status notification:", error);
+      // Otherwise, if different payment_id or status, you may block or allow based on business rules.
+      // Here: disallow if already confirmed or cancelled:
+      if (
+        [
+          "confirmed",
+          "cancelled",
+          "preparing",
+          "out_for_delivery",
+          "delivered",
+        ].includes(order.status)
+      ) {
+        return res
+          .status(409)
+          .json({ error: "Order already processed with a payment" });
+      }
     }
-  }
 
-  static async sendCancellationNotification(order, reason) {
-    try {
-      // Notify customer
-      await externalServices.sendNotification(order.customer_id, {
-        type: "order_cancelled",
-        order_id: order.id,
-        reason: reason,
-      });
-
-      // Notify restaurant
-      await externalServices.notifyRestaurant(order.restaurant_id, {
-        type: "order_cancelled",
-        order_id: order.id,
-        reason: reason,
-      });
-    } catch (error) {
-      logger.error("Failed to send cancellation notification:", error);
+    // Check uniqueness of payment_id across orders:
+    const existing = await Order.findOne({ where: { payment_id } });
+    if (existing && existing.id !== order.id) {
+      return res
+        .status(409)
+        .json({ error: "This payment_id is already used by another order" });
     }
-  }
-}
 
-module.exports = OrderController;
+    // Update:
+    order.payment_id = payment_id;
+    order.status = status;
+    await order.save();
+
+    res.json({
+      message: "Payment and status updated",
+      orderId: id,
+      payment_id,
+      newStatus: status,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update payment/status" });
+  }
+};
