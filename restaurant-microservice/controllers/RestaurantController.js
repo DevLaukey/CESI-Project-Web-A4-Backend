@@ -251,6 +251,39 @@ class RestaurantController {
     }
   }
 
+
+  // Delete restaurant by ID
+  static async deleteRestaurant(req, res, next) {
+    try {
+      const { uuid } = req.params;
+      const ownerId = RestaurantController.getUserID(req);
+
+      const restaurant = await Restaurant.findOne({
+        where: { uuid, ownerId, isActive: true },
+      });
+      if (!restaurant) {
+        return res.status(404).json({
+          success: false,
+          error: "Restaurant not found",
+          message: "No active restaurant found with the provided ID",
+        });
+      }
+  // Soft delete the restaurant
+      await restaurant.update({ isActive: false });
+      res.json({
+        success: true,
+        message: "Restaurant deleted successfully",
+      });
+    } catch (error) {
+      console.error("Error deleting restaurant:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal Server Error",
+        message: "An error occurred while deleting the restaurant",
+      });
+      next(error);
+    }
+  }
   // Get restaurant by ID
   static async getRestaurant(req, res, next) {
     try {
