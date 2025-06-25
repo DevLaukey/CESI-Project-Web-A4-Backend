@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  notification-service:
+    build: .
+    ports:
+      - "3006:3006"
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/notifications
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - JWT_SECRET=secret-key
+    depends_on:
+      - mongo
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
