@@ -1,25 +1,23 @@
 const Driver = require("../models/Driver");
 const Delivery = require("../models/Delivery");
-const db = require("../config/database");
+const { sequelize, execute } = require("../config/database");
 const logger = require("../utils/logger");
 const {
-  validateDriver,
+  validateDriverRegistration,
   validateDriverUpdate,
   validateDriverDocuments,
-} = require("../validators/deliveryValidator");
+} = require("../validators/driverValidator");
 const externalServices = require("../services/externalServices");
 
 class DriverController {
   // Register as driver
   static async registerDriver(req, res) {
-    const connection = await db.getConnection();
+    const transaction = await sequelize.transaction();
 
     try {
-      await connection.beginTransaction();
-
-      const { error, value } = validateDriver(req.body);
+      const { error, value } = validateDriverRegistration(req.body);
       if (error) {
-        await connection.rollback();
+        await transaction.rollback();
         return res.status(400).json({
           success: false,
           message: "Validation error",
@@ -30,7 +28,7 @@ class DriverController {
       // Check if user is already a driver
       const existingDriver = await Driver.findByUserId(req.user.id);
       if (existingDriver) {
-        await connection.rollback();
+        await transaction.rollback();
         return res.status(409).json({
           success: false,
           message: "User is already registered as a driver",
@@ -70,7 +68,7 @@ class DriverController {
             // Validate document
             const validation = validateDriverDocuments(file, documentType);
             if (!validation.isValid) {
-              await connection.rollback();
+              await transaction.rollback();
               return res.status(400).json({
                 success: false,
                 message: validation.message,
@@ -79,7 +77,7 @@ class DriverController {
             }
 
             // Save document to database
-            const [result] = await connection.execute(
+            const [result] = await execute(
               `INSERT INTO driver_documents 
                (driver_id, document_type, file_name, file_path, file_url, file_size, mime_type, upload_status, uploaded_at) 
                VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', NOW())`,
@@ -91,7 +89,8 @@ class DriverController {
                 file.url,
                 file.size,
                 file.mimetype,
-              ]
+              ],
+              transaction
             );
 
             savedDocuments.push({
@@ -116,18 +115,19 @@ class DriverController {
           DriverController.checkRequiredDocuments(documentTypes);
 
         if (hasRequiredDocs) {
-          await connection.execute(
+          await execute(
             `UPDATE drivers SET 
              verification_status = 'pending_review',
              documents_uploaded_at = NOW(),
              updated_at = NOW()
              WHERE id = ?`,
-            [driver.id]
+            [driver.id],
+            transaction
           );
         }
       }
 
-      await connection.commit();
+      await transaction.commit();
 
       logger.info(`Driver registered: ${driver.id} for user: ${req.user.id}`);
 
@@ -142,14 +142,52 @@ class DriverController {
         },
       });
     } catch (error) {
-      await connection.rollback();
+      await transaction.rollback();
       logger.error("Register driver error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",
       });
-    } finally {
-      connection.release();
+    }
+  }
+
+  static async getAllDrivers(req, res) {
+    try {
+      // Get all drivers with their documents
+      const drivers = await Driver.findAllWithDocuments();
+      if (drivers.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No drivers found",
+        });
+      }
+      res.json({
+        success: true,
+        data: drivers.map((driver) => ({
+          id: driver.id,
+          userId: driver.user_id,
+          name: driver.name,
+          email: driver.email,
+          phone: driver.phone,
+          isAvailable: driver.is_available,
+          documents: driver.documents.map((doc) => ({
+            id: doc.id,
+            documentType: doc.document_type,
+            fileName: doc.file_name,
+            fileUrl: doc.file_url,
+            fileSize: doc.file_size,
+            verificationStatus: doc.verification_status,
+            uploadedAt: doc.uploaded_at,
+            verifiedAt: doc.verified_at,
+          })),
+        })),
+      });
+    } catch (error) {
+      logger.error("Get all drivers error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
     }
   }
 
@@ -165,15 +203,18 @@ class DriverController {
         });
       }
 
-      // Get driver documents
-      const [documents] = await db.execute(
+      // Get driver documents using Sequelize query
+      const documents = await sequelize.query(
         `SELECT 
           id, document_type, file_name, file_url, file_size, 
           verification_status, uploaded_at, verified_at
         FROM driver_documents 
         WHERE driver_id = ? AND upload_status != 'deleted'
         ORDER BY uploaded_at DESC`,
-        [driver.id]
+        {
+          replacements: [driver.id],
+          type: sequelize.QueryTypes.SELECT,
+        }
       );
 
       res.json({
@@ -201,16 +242,131 @@ class DriverController {
     }
   }
 
+  // Continue with other methods using the same pattern...
+  // Replace all instances of:
+  // - `const connection = await db.getConnection()` with `const transaction = await sequelize.transaction()`
+  // - `await connection.beginTransaction()` (remove this line)
+  // - `await connection.execute(...)` with `await execute(..., transaction)`
+  // - `await connection.rollback()` with `await transaction.rollback()`
+  // - `await connection.commit()` with `await transaction.commit()`
+  // - `connection.release()` (remove this line)
+  // - `await db.execute(...)` with `await sequelize.query(..., { type: sequelize.QueryTypes.SELECT })`
+
+  static async getVerificationStatus(req, res) {
+    try {
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+      // Get verification status
+      const verificationStatus = await sequelize.query(
+        `SELECT
+
+          verification_status, documents_uploaded_at, updated_at
+        FROM drivers  
+        WHERE id = ?`,
+        {
+          replacements: [driver.id],
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      if (verificationStatus.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Verification status not found",
+        });
+      }
+      res.json({
+        success: true,
+        data: {
+          verificationStatus: verificationStatus[0].verification_status,
+          documentsUploadedAt: verificationStatus[0].documents_uploaded_at,
+          updatedAt: verificationStatus[0].updated_at,
+        },
+      });
+    } catch (error) {
+      logger.error("Get verification status error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  static async getCurrentDelivery(req, res) {
+    try {
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+      // Get current delivery
+      const currentDelivery = await Delivery.findCurrentByDriverId(driver.id);
+      if (!currentDelivery) {
+        return res.status(404).json({
+          success: false,
+          message: "No current delivery found for this driver",
+        });
+      }
+      res.json({
+        success: true,
+        data: currentDelivery,
+      });
+    } catch (error) {
+      logger.error("Get current delivery error:", error);
+      res.status(500).json({
+        success: false,
+
+        message: "Internal server error",
+      });
+    }
+  }
+
+  static async getAvailableDeliveries(req, res) {
+    try {
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+      // Get available deliveries
+      const availableDeliveries = await Delivery.findAvailableByDriverId(
+        driver.id
+      );
+      if (availableDeliveries.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No available deliveries found for this driver",
+        });
+      }
+      res.json({
+        success: true,
+        data: availableDeliveries,
+      });
+    } catch (error) {
+      logger.error("Get available deliveries error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
   // Update driver profile
   static async updateDriverProfile(req, res) {
-    const connection = await db.getConnection();
+    const transaction = await sequelize.transaction();
 
     try {
-      await connection.beginTransaction();
-
       const { error, value } = validateDriverUpdate(req.body);
       if (error) {
-        await connection.rollback();
+        await transaction.rollback();
         return res.status(400).json({
           success: false,
           message: "Validation error",
@@ -220,7 +376,7 @@ class DriverController {
 
       const driver = await Driver.findByUserId(req.user.id);
       if (!driver) {
-        await connection.rollback();
+        await transaction.rollback();
         return res.status(404).json({
           success: false,
           message: "Driver profile not found",
@@ -243,7 +399,7 @@ class DriverController {
           // Validate document
           const validation = validateDriverDocuments(file, documentType);
           if (!validation.isValid) {
-            await connection.rollback();
+            await transaction.rollback();
             return res.status(400).json({
               success: false,
               message: validation.message,
@@ -252,7 +408,7 @@ class DriverController {
           }
 
           // Save document to database
-          const [result] = await connection.execute(
+          const [result] = await execute(
             `INSERT INTO driver_documents 
              (driver_id, document_type, file_name, file_path, file_url, file_size, mime_type, upload_status, uploaded_at) 
              VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', NOW())`,
@@ -264,7 +420,8 @@ class DriverController {
               file.url,
               file.size,
               file.mimetype,
-            ]
+            ],
+            transaction
           );
 
           savedDocuments.push({
@@ -283,7 +440,7 @@ class DriverController {
         }
       }
 
-      await connection.commit();
+      await transaction.commit();
 
       res.json({
         success: true,
@@ -295,758 +452,248 @@ class DriverController {
         },
       });
     } catch (error) {
-      await connection.rollback();
+      await transaction.rollback();
       logger.error("Update driver profile error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",
       });
-    } finally {
-      connection.release();
     }
   }
 
-  // Upload driver documents
-  static async uploadDriverDocuments(req, res) {
-    const connection = await db.getConnection();
-
+  static async getDriverEarnings(req, res) {
     try {
-      await connection.beginTransaction();
-
-      const driverId = req.user.id;
-      const uploadedDocuments = req.uploadedDocuments || {};
-      const uploadedFiles = req.uploadedFiles || [];
-
-      // Validate that at least one document was uploaded
-      if (
-        Object.keys(uploadedDocuments).length === 0 &&
-        uploadedFiles.length === 0
-      ) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "No documents were uploaded",
-          error: "NO_DOCUMENTS",
-        });
-      }
-
-      // Check if driver exists and is active
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        await connection.rollback();
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      const savedDocuments = [];
-
-      // Process multiple field uploads (from driverRegistration middleware)
-      if (Object.keys(uploadedDocuments).length > 0) {
-        for (const [documentType, files] of Object.entries(uploadedDocuments)) {
-          for (const file of files) {
-            // Validate document
-            const validation = validateDriverDocuments(file, documentType);
-            if (!validation.isValid) {
-              await connection.rollback();
-              return res.status(400).json({
-                success: false,
-                message: validation.message,
-                error: "VALIDATION_ERROR",
-              });
-            }
-
-            // Save document to database
-            const [result] = await connection.execute(
-              `INSERT INTO driver_documents 
-               (driver_id, document_type, file_name, file_path, file_url, file_size, mime_type, upload_status, uploaded_at) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', NOW())`,
-              [
-                driver.id,
-                documentType,
-                file.filename,
-                file.path,
-                file.url,
-                file.size,
-                file.mimetype,
-              ]
-            );
-
-            savedDocuments.push({
-              documentId: result.insertId,
-              documentType,
-              fileName: file.filename,
-              fileUrl: file.url,
-              fileSize: file.size,
-              uploadedAt: new Date(),
-            });
-
-            logger.info("Driver document saved to database", {
-              driverId: driver.id,
-              documentType,
-              fileName: file.filename,
-              documentId: result.insertId,
-            });
-          }
-        }
-      }
-
-      // Process array uploads (from driverProfileUpdate middleware)
-      if (uploadedFiles.length > 0) {
-        for (const file of uploadedFiles) {
-          // Determine document type from filename or default to 'other'
-          const documentType =
-            DriverController.determineDocumentType(file.filename) || "other";
-
-          // Validate document
-          const validation = validateDriverDocuments(file, documentType);
-          if (!validation.isValid) {
-            await connection.rollback();
-            return res.status(400).json({
-              success: false,
-              message: validation.message,
-              error: "VALIDATION_ERROR",
-            });
-          }
-
-          // Save document to database
-          const [result] = await connection.execute(
-            `INSERT INTO driver_documents 
-             (driver_id, document_type, file_name, file_path, file_url, file_size, mime_type, upload_status, uploaded_at) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', NOW())`,
-            [
-              driver.id,
-              documentType,
-              file.filename,
-              file.path,
-              file.url,
-              file.size,
-              file.mimetype,
-            ]
-          );
-
-          savedDocuments.push({
-            documentId: result.insertId,
-            documentType,
-            fileName: file.filename,
-            fileUrl: file.url,
-            fileSize: file.size,
-            uploadedAt: new Date(),
-          });
-
-          logger.info("Driver document saved to database", {
-            driverId: driver.id,
-            documentType,
-            fileName: file.filename,
-            documentId: result.insertId,
-          });
-        }
-      }
-
-      // Update driver verification status if key documents are uploaded
-      const documentTypes = savedDocuments.map((doc) => doc.documentType);
-      const hasRequiredDocs =
-        DriverController.checkRequiredDocuments(documentTypes);
-
-      if (hasRequiredDocs) {
-        await connection.execute(
-          `UPDATE drivers SET 
-           verification_status = 'pending_review',
-           documents_uploaded_at = NOW(),
-           updated_at = NOW()
-           WHERE id = ?`,
-          [driver.id]
-        );
-
-        logger.info("Driver verification status updated to pending_review", {
-          driverId: driver.id,
-          documentCount: savedDocuments.length,
-        });
-      }
-
-      await connection.commit();
-
-      res.status(201).json({
-        success: true,
-        message: "Documents uploaded successfully",
-        data: {
-          documentsUploaded: savedDocuments.length,
-          documents: savedDocuments,
-          verificationStatus: hasRequiredDocs ? "pending_review" : "incomplete",
-          requiresReview: hasRequiredDocs,
-        },
-      });
-    } catch (error) {
-      await connection.rollback();
-      logger.error("Error uploading driver documents:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to upload documents",
-        error: "UPLOAD_ERROR",
-      });
-    } finally {
-      connection.release();
-    }
-  }
-
-  // Get driver documents
-  static async getDriverDocuments(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
+      const driver = await Driver.findByUserId(req.user.id);
       if (!driver) {
         return res.status(404).json({
           success: false,
           message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
         });
       }
-
-      // Get driver documents
-      const [documents] = await db.execute(
-        `SELECT 
-          dd.id,
-          dd.document_type,
-          dd.file_name,
-          dd.file_url,
-          dd.file_size,
-          dd.mime_type,
-          dd.upload_status,
-          dd.verification_status,
-          dd.verification_notes,
-          dd.uploaded_at,
-          dd.verified_at
-        FROM driver_documents dd
-        WHERE dd.driver_id = ? AND dd.upload_status != 'deleted'
-        ORDER BY dd.uploaded_at DESC`,
-        [driver.id]
+      // Get driver earnings
+      const earnings = await sequelize.query(
+        `SELECT
+          SUM(amount) AS total_earnings,
+          COUNT(*) AS total_deliveries,
+          SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) AS completed_earnings,
+          SUM(CASE WHEN status = 'cancelled' THEN amount ELSE 0 END) AS cancelled_earnings,
+          SUM(CASE WHEN status = 'in_progress' THEN amount ELSE 0 END) AS
+          in_progress_earnings
+        FROM deliveries
+        WHERE driver_id = ?`,
+        {
+          replacements: [driver.id],
+          type: sequelize.QueryTypes.SELECT,
+        }
       );
-
-      // Group documents by type
-      const documentsByType = documents.reduce((acc, doc) => {
-        if (!acc[doc.document_type]) {
-          acc[doc.document_type] = [];
-        }
-        acc[doc.document_type].push({
-          id: doc.id,
-          fileName: doc.file_name,
-          fileUrl: doc.file_url,
-          fileSize: doc.file_size,
-          mimeType: doc.mime_type,
-          uploadStatus: doc.upload_status,
-          verificationStatus: doc.verification_status,
-          verificationNotes: doc.verification_notes,
-          uploadedAt: doc.uploaded_at,
-          verifiedAt: doc.verified_at,
+      if (earnings.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No earnings found for this driver",
         });
-        return acc;
-      }, {});
-
+      }
       res.json({
         success: true,
-        message: "Documents retrieved successfully",
         data: {
-          totalDocuments: documents.length,
-          documentsByType,
-          documents: documents.map((doc) => ({
-            id: doc.id,
-            documentType: doc.document_type,
-            fileName: doc.file_name,
-            fileUrl: doc.file_url,
-            fileSize: doc.file_size,
-            mimeType: doc.mime_type,
-            uploadStatus: doc.upload_status,
-            verificationStatus: doc.verification_status,
-            verificationNotes: doc.verification_notes,
-            uploadedAt: doc.uploaded_at,
-            verifiedAt: doc.verified_at,
-          })),
+          totalEarnings: earnings[0].total_earnings || 0,
+          totalDeliveries: earnings[0].total_deliveries || 0,
+          completedEarnings: earnings[0].completed_earnings || 0,
+          cancelledEarnings: earnings[0].cancelled_earnings || 0,
+          inProgressEarnings: earnings[0].in_progress_earnings || 0,
         },
       });
     } catch (error) {
-      logger.error("Error retrieving driver documents:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
+      logger.error("Get driver earnings error:", error);
       res.status(500).json({
         success: false,
-        message: "Failed to retrieve documents",
-        error: "RETRIEVAL_ERROR",
+        message: "Internal server error",
       });
     }
   }
 
-  // Delete driver document
-  static async deleteDriverDocument(req, res) {
-    const connection = await db.getConnection();
-
+  static async getDriverStats(req, res) {
     try {
-      await connection.beginTransaction();
-
-      const driverId = req.user.id;
-      const documentId = req.params.documentId;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
+      const driver = await Driver.findByUserId(req.user.id);
       if (!driver) {
-        await connection.rollback();
         return res.status(404).json({
           success: false,
           message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
         });
       }
-
-      // Verify document belongs to driver
-      const [document] = await connection.execute(
-        `SELECT dd.id, dd.file_path, dd.file_name, dd.document_type
-         FROM driver_documents dd
-         WHERE dd.id = ? AND dd.driver_id = ? AND dd.upload_status != 'deleted'`,
-        [documentId, driver.id]
+      // Get driver statistics
+      const stats = await sequelize.query(
+        `SELECT
+          COUNT(*) AS total_deliveries,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_deliveries,
+          SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_deliveries,
+          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress_deliveries,
+          AVG(rating) AS average_rating
+        FROM deliveries
+        WHERE driver_id = ?`,
+        {
+          replacements: [driver.id],
+          type: sequelize.QueryTypes.SELECT,
+        }
       );
-
-      if (document.length === 0) {
-        await connection.rollback();
+      if (stats.length === 0) {
         return res.status(404).json({
           success: false,
-          message: "Document not found",
-          error: "DOCUMENT_NOT_FOUND",
+          message: "No delivery statistics found for this driver",
         });
       }
-
-      // Mark document as deleted (soft delete)
-      await connection.execute(
-        `UPDATE driver_documents 
-         SET upload_status = 'deleted', deleted_at = NOW()
-         WHERE id = ?`,
-        [documentId]
-      );
-
-      // Optionally delete physical file
-      const { deleteFile } = require("../middleware/upload");
-      const deleted = await deleteFile(document[0].file_path);
-
-      await connection.commit();
-
-      logger.info("Driver document deleted", {
-        documentId,
-        fileName: document[0].file_name,
-        documentType: document[0].document_type,
-        physicalFileDeleted: deleted,
-        driverId: driver.id,
+      res.json({
+        success: true,
+        data: {
+          totalDeliveries: stats[0].total_deliveries,
+          completedDeliveries: stats[0].completed_deliveries,
+          cancelledDeliveries: stats[0].cancelled_deliveries,
+          inProgressDeliveries: stats[0].in_progress_deliveries,
+          averageRating: stats[0].average_rating || 0, // Handle case where no ratings exist
+        },
       });
+    } catch (error) {
+      logger.error("Get driver statistics error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
 
+  static async getVehicleInfo(req, res) {
+    try {
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+      // Get vehicle information
+      const vehicleInfo = await sequelize.query(
+        `SELECT
+          vehicle_make, vehicle_model, vehicle_year, vehicle_color,
+          vehicle_plate_number, vehicle_vin, vehicle_type
+        FROM drivers
+        WHERE id = ?`,
+        {
+          replacements: [driver.id],
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      if (vehicleInfo.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Vehicle information not found for this driver",
+        });
+      }
+      res.json({
+        success: true,
+        data: {
+          vehicleMake: vehicleInfo[0].vehicle_make,
+          vehicleModel: vehicleInfo[0].vehicle_model,
+          vehicleYear: vehicleInfo[0].vehicle_year,
+          vehicleColor: vehicleInfo[0].vehicle_color,
+          vehiclePlateNumber: vehicleInfo[0].vehicle_plate_number,
+          vehicleVin: vehicleInfo[0].vehicle_vin,
+          vehicleType: vehicleInfo[0].vehicle_type,
+        },
+      });
+    } catch (error) {
+      logger.error("Get vehicle information error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  static async toggleAvailability(req, res) {
+    const transaction = sequelize.transaction();
+    try {
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+      // Toggle availability
+      const newStatus = driver.is_available ? 0 : 1;
+      await execute(
+        `UPDATE drivers SET
+
+          is_available = ?, updated_at = NOW()
+          WHERE id = ?`,
+        [newStatus, driver.id],
+        transaction
+      );
+      await transaction.commit();
+      res.json({
+        success: true,
+        message: `Driver availability updated to ${
+          newStatus ? "available" : "unavailable"
+        }`,
+      });
+    } catch (error) {
+      await transaction.rollback();
+      logger.error("Toggle driver availability error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  static async deleteDriverDocument(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const { documentId } = req.params;
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+      // Check if document exists
+      const [document] = await sequelize.query(
+        `SELECT id, document_type, file_name, file_url
+         FROM driver_documents
+
+
+          WHERE id = ? AND driver_id = ? AND upload_status != 'deleted'`,
+        {
+          replacements: [documentId, driver.id],
+          type: sequelize.QueryTypes.SELECT,
+        }
+      );
+      if (!document) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Document not found or already deleted",
+        });
+      }
+      // Mark document as deleted
+      await execute(
+        `UPDATE driver_documents
+
+          SET upload_status = 'deleted', updated_at = NOW()
+          WHERE id = ? AND driver_id = ?`,
+        [documentId, driver.id],
+        transaction
+      );
+      await transaction.commit();
       res.json({
         success: true,
         message: "Document deleted successfully",
-        data: {
-          documentId,
-          fileName: document[0].file_name,
-          physicalFileDeleted: deleted,
-        },
       });
     } catch (error) {
-      await connection.rollback();
-      logger.error("Error deleting driver document:", {
-        error: error.message,
-        stack: error.stack,
-        documentId: req.params.documentId,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to delete document",
-        error: "DELETE_ERROR",
-      });
-    } finally {
-      connection.release();
-    }
-  }
-
-  static async setDriverSchedule(req, res) {
-    const connection = await db.getConnection();
-    try {
-      await connection.beginTransaction();
-      const driverId = req.user.id;
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        await connection.rollback();
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-      const { schedule } = req.body;
-      if (!Array.isArray(schedule) || schedule.length === 0) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid schedule format",
-          error: "INVALID_SCHEDULE",
-        });
-      }
-      // Validate schedule entries
-      for (const entry of schedule) {
-        if (
-          !entry.dayOfWeek ||
-          !entry.startTime ||
-          !entry.endTime ||
-          typeof entry.isAvailable !== "boolean"
-        ) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: "Invalid schedule entry format",
-            error: "INVALID_SCHEDULE_ENTRY",
-          });
-        }
-        if (
-          ![
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-            "Sunday",
-          ].includes(entry.dayOfWeek)
-        ) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: "Invalid day of week",
-            error: "INVALID_DAY_OF_WEEK",
-          });
-        }
-        if (
-          !/^([01]\d|2[0-3]):([0-5]\d)$/.test(entry.startTime) ||
-          !/^([01]\d|2[0-3]):([0-5]\d)$/.test(entry.endTime)
-        ) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: "Invalid time format",
-            error: "INVALID_TIME_FORMAT",
-          });
-        }
-        if (entry.startTime >= entry.endTime) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: "Start time must be before end time",
-            error: "INVALID_TIME_RANGE",
-          });
-        }
-      }
-      // Clear existing schedule
-      await connection.execute(
-        `DELETE FROM driver_schedule WHERE driver_id = ?`,
-        [driver.id]
-      );
-      // Insert new schedule
-      const insertPromises = schedule.map((entry) => {
-        return connection.execute(
-          `INSERT INTO driver_schedule
-
-            (driver_id, day_of_week, start_time, end_time, is_available)
-          VALUES (?, ?, ?, ?, ?)`,
-          [
-            driver.id,
-            entry.dayOfWeek,
-            entry.startTime,
-            entry.endTime,
-            entry.isAvailable,
-          ]
-        );
-      });
-      await Promise.all(insertPromises);
-      await connection.commit();
-      logger.info("Driver schedule updated", {
-        driverId: driver.id,
-        schedule: schedule.map((s) => ({
-          dayOfWeek: s.dayOfWeek,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          isAvailable: s.isAvailable,
-        })),
-      });
-      res.json({
-        success: true,
-        message: "Driver schedule updated successfully",
-        data: {
-          driverId: driver.id,
-          schedule: schedule.map((s) => ({
-            dayOfWeek: s.dayOfWeek,
-            startTime: s.startTime,
-            endTime: s.endTime,
-            isAvailable: s.isAvailable,
-          })),
-        },
-      });
-    } catch (error) {
-      await connection.rollback();
-      logger.error("Error setting driver schedule:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-      res.status(500).json({
-        success: false,
-        message: "Failed to set driver schedule",
-        error: "SCHEDULE_ERROR",
-      });
-    } finally {
-      connection.release();
-    }
-  }
-
-  static async getAvailableDeliveries(req, res) {
-    try {
-      const driverId = req.user.id;
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-    } catch (error) {
-      logger.error("Error getting available deliveries:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-      res.status(500).json({
-        success: false,
-        message: "Failed to get available deliveries",
-        error: "DELIVERY_ERROR",
-      });
-    }
-  }
-
-  static async getCurrentDelivery(req, res) {}
-
-  // Get driver verification status
-  static async getVerificationStatus(req, res) {
-    try {
-      const driverId = req.user.id;
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get document verification status
-      const [documents] = await db.execute(
-        `SELECT 
-        document_type,
-        verification_status,
-        verification_notes,
-        uploaded_at,
-        verified_at
-      FROM driver_documents 
-      WHERE driver_id = ? AND upload_status != 'deleted'
-      ORDER BY uploaded_at DESC`,
-        [driver.id]
-      );
-
-      // Check which required documents are uploaded and verified
-      const requiredDocuments = [
-        "driverLicense",
-        "insurance",
-        "vehicleRegistration",
-      ];
-      const documentStatus = {};
-
-      requiredDocuments.forEach((docType) => {
-        const doc = documents.find((d) => d.document_type === docType);
-        documentStatus[docType] = {
-          uploaded: !!doc,
-          verificationStatus: doc ? doc.verification_status : "not_uploaded",
-          verificationNotes: doc ? doc.verification_notes : null,
-          uploadedAt: doc ? doc.uploaded_at : null,
-          verifiedAt: doc ? doc.verified_at : null,
-        };
-      });
-
-      // Calculate overall verification status
-      const allRequiredUploaded = requiredDocuments.every(
-        (doc) => documentStatus[doc].uploaded
-      );
-      const allRequiredApproved = requiredDocuments.every(
-        (doc) => documentStatus[doc].verificationStatus === "approved"
-      );
-      const anyRejected = requiredDocuments.some(
-        (doc) => documentStatus[doc].verificationStatus === "rejected"
-      );
-
-      let overallStatus = "incomplete";
-      if (anyRejected) {
-        overallStatus = "rejected";
-      } else if (allRequiredApproved) {
-        overallStatus = "verified";
-      } else if (allRequiredUploaded) {
-        overallStatus = "pending_review";
-      }
-
-      // Get additional driver verification info
-      const [driverInfo] = await db.execute(
-        `SELECT 
-        verification_status,
-        is_verified,
-        documents_uploaded_at,
-        verification_completed_at,
-        verification_notes
-      FROM drivers 
-      WHERE id = ?`,
-        [driver.id]
-      );
-
-      const verificationInfo = driverInfo[0] || {};
-
-      res.json({
-        success: true,
-        message: "Verification status retrieved successfully",
-        data: {
-          overallStatus,
-          isVerified: driver.is_verified || false,
-          canGoOnline: allRequiredApproved && driver.is_verified,
-          verificationStatus: verificationInfo.verification_status || "pending",
-          documentsUploadedAt: verificationInfo.documents_uploaded_at,
-          verificationCompletedAt: verificationInfo.verification_completed_at,
-          verificationNotes: verificationInfo.verification_notes,
-          requiredDocuments: documentStatus,
-          optionalDocuments: documents
-            .filter((doc) => !requiredDocuments.includes(doc.document_type))
-            .map((doc) => ({
-              documentType: doc.document_type,
-              verificationStatus: doc.verification_status,
-              verificationNotes: doc.verification_notes,
-              uploadedAt: doc.uploaded_at,
-              verifiedAt: doc.verified_at,
-            })),
-          missingDocuments: requiredDocuments.filter(
-            (doc) => !documentStatus[doc].uploaded
-          ),
-          rejectedDocuments: requiredDocuments.filter(
-            (doc) => documentStatus[doc].verificationStatus === "rejected"
-          ),
-        },
-      });
-    } catch (error) {
-      logger.error("Error getting verification status:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get verification status",
-        error: "VERIFICATION_STATUS_ERROR",
-      });
-    }
-  }
-
-  static async getDriverSchedule(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get driver's schedule
-      const [schedule] = await db.execute(
-        `SELECT 
-          id, day_of_week, start_time, end_time, is_available 
-        FROM driver_schedule 
-        WHERE driver_id = ? 
-        ORDER BY day_of_week`,
-        [driver.id]
-      );
-
-      res.json({
-        success: true,
-        message: "Driver schedule retrieved successfully",
-        data: schedule.map((s) => ({
-          id: s.id,
-          dayOfWeek: s.day_of_week,
-          startTime: s.start_time,
-          endTime: s.end_time,
-          isAvailable: s.is_available,
-        })),
-      });
-    } catch (error) {
-      logger.error("Error getting driver schedule:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver schedule",
-        error: "SCHEDULE_ERROR",
-      });
-    }
-  }
-
-  // Update driver location
-  static async updateLocation(req, res) {
-    try {
-      const { lat, lng } = req.body;
-
-      if (!lat || !lng) {
-        return res.status(400).json({
-          success: false,
-          message: "Latitude and longitude are required",
-        });
-      }
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      await Driver.updateLocation(driver.id, lat, lng);
-
-      // Real-time location update
-      const socketManager = req.app.get("socketManager");
-      socketManager.updateDriverLocation(req.user.id, { lat, lng });
-
-      res.json({
-        success: true,
-        message: "Location updated successfully",
-      });
-    } catch (error) {
-      logger.error("Update location error:", error);
+      await transaction.rollback();
+      logger.error("Delete driver document error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",
@@ -1054,747 +701,7 @@ class DriverController {
     }
   }
 
-  // Toggle availability
-  static async toggleAvailability(req, res) {
-    try {
-      const { available } = req.body;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      if (!driver.is_verified) {
-        return res.status(400).json({
-          success: false,
-          message: "Driver must be verified before going online",
-        });
-      }
-
-      const updatedDriver = await Driver.updateAvailability(
-        driver.id,
-        available
-      );
-
-      // Real-time availability update
-      const socketManager = req.app.get("socketManager");
-      socketManager.updateDriverAvailability(req.user.id, available);
-
-      res.json({
-        success: true,
-        message: `Driver is now ${available ? "available" : "unavailable"}`,
-        data: updatedDriver,
-      });
-    } catch (error) {
-      logger.error("Toggle availability error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // Get driver deliveries
-  static async getDriverDeliveries(req, res) {
-    try {
-      const { page = 1, limit = 20, status } = req.query;
-      const offset = (page - 1) * limit;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const deliveries = await Delivery.findByDriver(
-        driver.id,
-        parseInt(limit),
-        offset,
-        status
-      );
-
-      res.json({
-        success: true,
-        data: deliveries,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: deliveries.length,
-        },
-      });
-    } catch (error) {
-      logger.error("Get driver deliveries error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  // Get driver statistics
-  static async getDriverStats(req, res) {
-    try {
-      const { start_date, end_date } = req.query;
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const stats = await Driver.getDriverStats(
-        driver.id,
-        start_date,
-        end_date
-      );
-
-      res.json({
-        success: true,
-        data: {
-          ...stats,
-          total_deliveries_lifetime: driver.total_deliveries,
-          total_earnings_lifetime: driver.total_earnings,
-          current_rating: driver.rating,
-        },
-      });
-    } catch (error) {
-      logger.error("Get driver stats error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  static async getOptimizedRoute(req, res) {
-    try {
-      const { deliveryIds } = req.body;
-
-      if (!Array.isArray(deliveryIds) || deliveryIds.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid delivery IDs",
-        });
-      }
-
-      const driver = await Driver.findByUserId(req.user.id);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-        });
-      }
-
-      const route = await Delivery.getOptimizedRoute(deliveryIds, driver.id);
-
-      res.json({
-        success: true,
-        data: route,
-      });
-    } catch (error) {
-      logger.error("Get optimized route error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  static async getDriverEarnings(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get earnings data
-      const earnings = await Driver.getEarnings(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver earnings retrieved successfully",
-        data: earnings,
-      });
-    } catch (error) {
-      logger.error("Error getting driver earnings:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver earnings",
-        error: "EARNINGS_ERROR",
-      });
-    }
-  }
-
-  static async getDriverRating(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get rating data
-      const rating = await Driver.getRating(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver rating retrieved successfully",
-        data: rating,
-      });
-    } catch (error) {
-      logger.error("Error getting driver rating:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver rating",
-        error: "RATING_ERROR",
-      });
-    }
-  }
-
-  static async getDriverRatings(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get ratings data
-      const ratings = await Driver.getRatings(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver ratings retrieved successfully",
-        data: ratings,
-      });
-    } catch (error) {
-      logger.error("Error getting driver ratings:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver ratings",
-        error: "RATINGS_ERROR",
-      });
-    }
-  }
-
-  static async getReferralStats(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get referral stats
-      const referralStats = await Driver.getReferralStats(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver referral stats retrieved successfully",
-        data: referralStats,
-      });
-    } catch (error) {
-      logger.error("Error getting driver referral stats:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver referral stats",
-        error: "REFERRAL_STATS_ERROR",
-      });
-    }
-  }
-
-  static async generateReferralCode(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Generate referral code
-      const referralCode = await Driver.generateReferralCode(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver referral code generated successfully",
-        data: referralCode,
-      });
-    } catch (error) {
-      logger.error("Error generating driver referral code:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to generate driver referral code",
-        error: "REFERRAL_CODE_ERROR",
-      });
-    }
-  }
-
-  static async getNearbyDrivers(req, res) { 
-    try {
-      const { lat, lng, radius = 5 } = req.query;
-
-      if (!lat || !lng) {
-        return res.status(400).json({
-          success: false,
-          message: "Latitude and longitude are required",
-          error: "MISSING_COORDINATES",
-        });
-      }
-
-      // Get nearby drivers
-      const drivers = await Driver.getNearbyDrivers(lat, lng, radius);
-
-      res.json({
-        success: true,
-        message: "Nearby drivers retrieved successfully",
-        data: drivers,
-      });
-    } catch (error) {
-      logger.error("Error getting nearby drivers:", {
-        error: error.message,
-        stack: error.stack,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get nearby drivers",
-        error: "NEARBY_DRIVERS_ERROR",
-      });
-    }
-  }
-  static async updateVehicleInfo(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Validate vehicle info
-      const { make, model, year, licensePlate } = req.body;
-      if (!make || !model || !year || !licensePlate) {
-        return res.status(400).json({
-          success: false,
-          message: "All vehicle fields are required",
-          error: "VALIDATION_ERROR",
-        });
-      }
-
-      // Update vehicle info
-      await Driver.updateVehicleInfo(driver.id, {
-        make,
-        model,
-        year,
-        licensePlate,
-      });
-
-      res.json({
-        success: true,
-        message: "Driver vehicle info updated successfully",
-      });
-    } catch (error) {
-      logger.error("Error updating driver vehicle info:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to update driver vehicle info",
-        error: "VEHICLE_INFO_ERROR",
-      });
-    }
-  }
-  static async getVehicleInfo(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get vehicle info
-      const vehicleInfo = await Driver.getVehicleInfo(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver vehicle info retrieved successfully",
-        data: vehicleInfo,
-      });
-    } catch (error) {
-      logger.error("Error getting driver vehicle info:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver vehicle info",
-        error: "VEHICLE_INFO_ERROR",
-      });
-    }
-  }
-
-  static async getDriverReferralCode(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get referral code
-      const referralCode = await Driver.getReferralCode(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver referral code retrieved successfully",
-        data: referralCode,
-      });
-    } catch (error) {
-      logger.error("Error getting driver referral code:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver referral code",
-        error: "REFERRAL_CODE_ERROR",
-      });
-    }
-  }
-
-  static async getAllDrivers(req, res) {
-    try {
-      const drivers = await Driver.getAllDrivers();
-      res.json({
-        success: true,
-        message: "All drivers retrieved successfully",
-        data: drivers,
-      });
-    } catch (error) {
-      logger.error("Error getting all drivers:", {
-        error: error.message,
-        stack: error.stack,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get all drivers",
-        error: "ALL_DRIVERS_ERROR",
-      });
-    }
-  }
-
-  static async suspendDriver(req, res) { 
-    try {
-      const driverId = req.params.driverId;
-
-      // Validate input
-      if (!driverId) {
-        return res.status(400).json({
-          success: false,
-          message: "Driver ID is required",
-          error: "MISSING_DRIVER_ID",
-        });
-      }
-
-      // Get driver to verify existence
-      const driver = await Driver.findById(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Suspend driver
-      await Driver.suspend(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver suspended successfully",
-        data: { driverId: driver.id },
-      });
-    } catch (error) {
-      logger.error("Error suspending driver:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.params.driverId,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to suspend driver",
-        error: "SUSPEND_ERROR",
-      });
-    }
-  }
-
-  static async getDriverAdminDetails(req, res) { 
-    try {
-      const driverId = req.params.driverId;
-
-      // Validate input
-      if (!driverId) {
-        return res.status(400).json({
-          success: false,
-          message: "Driver ID is required",
-          error: "MISSING_DRIVER_ID",
-        });
-      }
-
-      // Get driver to verify existence
-      const driver = await Driver.findById(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get driver details
-      const driverDetails = await Driver.getAdminDetails(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver admin details retrieved successfully",
-        data: driverDetails,
-      });
-    } catch (error) {
-      logger.error("Error getting driver admin details:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.params.driverId,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver admin details",
-        error: "ADMIN_DETAILS_ERROR",
-      });
-    }
-    
-  }
-
-  static async verifyDriver(req, res) { 
-    try {
-      const driverId = req.params.driverId;
-      const { status, notes } = req.body;
-
-      // Validate input
-      if (!["approved", "rejected"].includes(status)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid verification status",
-          error: "INVALID_STATUS",
-        });
-      }
-
-      // Get driver to verify existence
-      const driver = await Driver.findById(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Update verification status
-      await Driver.updateVerificationStatus(driver.id, status, notes);
-
-      res.json({
-        success: true,
-        message: `Driver ${status} successfully`,
-        data: {
-          driverId: driver.id,
-          verificationStatus: status,
-          notes,
-        },
-      });
-    } catch (error) {
-      logger.error("Error verifying driver:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.params.driverId,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to verify driver",
-        error: "VERIFICATION_ERROR",
-      });
-    }
-  }
-
-  static async getDriverPerformance(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get performance data
-      const performance = await Driver.getPerformance(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver performance retrieved successfully",
-        data: performance,
-      });
-    } catch (error) {
-      logger.error("Error getting driver performance:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver performance",
-        error: "PERFORMANCE_ERROR",
-      });
-    }
-  }
-  static async getDriverEarnings(req, res) {
-    try {
-      const driverId = req.user.id;
-
-      // Get driver to verify existence
-      const driver = await Driver.findByUserId(driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: "Driver profile not found",
-          error: "DRIVER_NOT_FOUND",
-        });
-      }
-
-      // Get earnings data
-      const earnings = await Driver.getEarnings(driver.id);
-
-      res.json({
-        success: true,
-        message: "Driver earnings retrieved successfully",
-        data: earnings,
-      });
-    } catch (error) {
-      logger.error("Error getting driver earnings:", {
-        error: error.message,
-        stack: error.stack,
-        driverId: req.user.id,
-      });
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to get driver earnings",
-        error: "EARNINGS_ERROR",
-      });
-    }
-  }
-
-  // ================================================================
-  // HELPER METHODS
-  // ================================================================
-
-  /**
-   * Determine document type from filename
-   */
+  // Helper methods remain the same
   static determineDocumentType(filename) {
     const lowerFilename = filename.toLowerCase();
 
@@ -1820,9 +727,78 @@ class DriverController {
     return "other";
   }
 
-  /**
-   * Check if required documents are uploaded
-   */
+  static async getDriverDeliveries(req, res) {
+    try {
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+
+      const deliveries = await Delivery.findByDriverId(driver.id);
+
+      res.json({
+        success: true,
+        data: deliveries,
+      });
+    } catch (error) {
+      logger.error("Get driver deliveries error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  static async updateLocation(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const { latitude, longitude } = req.body;
+
+      if (!latitude || !longitude) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Latitude and longitude are required",
+        });
+      }
+
+      const driver = await Driver.findByUserId(req.user.id);
+      if (!driver) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Driver profile not found",
+        });
+      }
+
+      // Update driver's location
+      await execute(
+        `UPDATE drivers SET 
+         latitude = ?, longitude = ?, updated_at = NOW() 
+         WHERE id = ?`,
+        [latitude, longitude, driver.id],
+        transaction
+      );
+
+      await transaction.commit();
+
+      res.json({
+        success: true,
+        message: "Location updated successfully",
+      });
+    } catch (error) {
+      await transaction.rollback();
+      logger.error("Update driver location error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
   static checkRequiredDocuments(documentTypes) {
     const requiredDocs = ["driverLicense", "insurance", "vehicleRegistration"];
     return requiredDocs.every((doc) => documentTypes.includes(doc));

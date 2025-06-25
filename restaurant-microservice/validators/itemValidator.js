@@ -92,12 +92,7 @@ const itemValidation = Joi.object({
     .optional()
     .label("Nutritional information"),
 
-  sortOrder: Joi.number()
-    .integer()
-    .min(0)
-    .default(0)
-    .optional()
-    .label("Sort order"),
+
 }).messages(customMessages);
 
 const updateItemValidation = Joi.object({

@@ -68,6 +68,10 @@ router.get("/profile", authMiddleware, UserController.getProfile);
  */
 router.put("/profile", authMiddleware, UserController.updateProfile);
 
+
+// getUserById
+router.get("/:userId", UserController.getUserById);
+
 /**
  * @swagger
  * /api/users/change-password:

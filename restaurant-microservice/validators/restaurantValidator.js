@@ -111,7 +111,6 @@ const restaurantValidation = Joi.object({
       "array.max": "Cannot have more than 10 tags",
     }),
   businessLicense: Joi.string().max(100).optional(),
-
 });
 
 const updateRestaurantValidation = Joi.object({
@@ -130,6 +129,7 @@ const updateRestaurantValidation = Joi.object({
   longitude: Joi.number().min(-180).max(180).optional(),
   deliveryFee: Joi.number().min(0).max(50).optional(),
   minimumOrder: Joi.number().min(0).optional(),
+  isOpen: Joi.boolean().optional(),
   averageDeliveryTime: Joi.number().min(10).max(120).optional(),
   openingHours: Joi.object().optional(),
   tags: Joi.array().items(Joi.string().max(50)).max(10).optional(),

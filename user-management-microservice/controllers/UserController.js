@@ -241,10 +241,22 @@ class UserController {
   // Get user by UUID (for other services)
   static async getUserById(req, res, next) {
     try {
-      const { uuid } = req.params;
+      const { userId } = req.params;
 
-      const user = await User.scope("withoutPassword").findOne({
-        where: { uuid, isActive: true },
+      const uuid = userId || req.query.uuid;
+
+      console.log(`Fetching user with UUID: ${uuid}`);
+      if (!uuid) {
+        return res.status(400).json({
+          success: false,
+          error: "UUID is missing from request parameters.",
+        });
+      }
+
+      console.log(`Fetching user with UUID: ${uuid}`);
+
+      const user = await User.findOne({
+        where: { uuid },
       });
 
       if (!user) {
@@ -269,34 +281,24 @@ class UserController {
     try {
       const { uuids } = req.body;
 
-      if (!Array.isArray(uuids) || uuids.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: "Validation Error",
-          message: "uuids must be a non-empty array",
-        });
-      }
+      console.log(`Fetching users with UUIDs: ${uuids}`);
 
-      if (uuids.length > 100) {
-        return res.status(400).json({
-          success: false,
-          error: "Validation Error",
-          message: "Maximum 100 UUIDs allowed per request",
-        });
-      }
-
-      const users = await User.scope("withoutPassword").findAll({
-        where: {
-          uuid: uuids,
-          isActive: true,
-        },
+      const user = await User.findOne({
+        where: { uuids },
       });
+      
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+          message: "No active user found with the provided ID",
+        });
+      }
 
       res.json({
         success: true,
-        users: users.map((user) => user.toJSON()),
-        found: users.length,
-        requested: uuids.length,
+        user: user.toJSON(),
       });
     } catch (error) {
       next(error);

@@ -118,6 +118,49 @@ class ItemController {
       next(error);
     }
   }
+  
+  // Get restaurant items by UUID with better error handling
+  static async getRestaurantItemsByUuid(req, res, next) {
+    try {
+      const { restaurantUuid } = req.params;
+
+ 
+      // Validate restaurant UUID
+      if (!restaurantUuid || typeof restaurantUuid !== "string") {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid restaurant ID",
+          message: "Please provide a valid restaurant ID",
+        });
+      }
+      const restaurant = await Restaurant.findOne({
+        where: { uuid: restaurantUuid, isActive: true },
+      });
+      if (!restaurant) {
+        return res.status(404).json({
+          success: false,
+          error: "Restaurant not found",
+          message: "No restaurant found with the provided ID",
+        });
+
+      }
+     
+      return res.json({
+        success: true,
+        message: "Restaurant items fetched successfully",
+        items: await Item.findAll({
+          where: { restaurantId: restaurant.id, isAvailable: true },
+          include: [{ model: Category, as: "category" }],
+          order: [["sortOrder", "ASC"], ["isPopular", "DESC"]],
+        }),
+      });
+      
+
+    } catch (error) {
+      console.error("Error fetching restaurant items by UUID:", error);
+      next(error);
+    }
+  }
 
   // Get restaurant items with better error handling
   static async getRestaurantItems(req, res, next) {

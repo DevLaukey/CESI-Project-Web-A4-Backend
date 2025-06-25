@@ -335,13 +335,13 @@ router.put(
  *       404:
  *         description: Driver profile not found
  */
-router.post(
-  "/documents",
-  auth,
-  upload.driverProfileUpdate,
-  rateLimitMiddleware.userRate,
-  DriverController.uploadDriverDocuments
-);
+// router.post(
+//   "/documents",
+//   auth,
+//   upload.driverProfileUpdate,
+//   rateLimitMiddleware.userRate,
+//   DriverController.uploadDriverDocuments
+// );
 
 /**
  * @swagger
@@ -480,12 +480,12 @@ router.patch(
  *       404:
  *         description: Driver profile not found
  */
-router.get(
-  "/schedule",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.getDriverSchedule
-);
+// router.get(
+//   "/schedule",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.getDriverSchedule
+// );
 
 /**
  * @swagger
@@ -588,12 +588,12 @@ router.get(
  *       200:
  *         description: Work schedule updated successfully
  */
-router.post(
-  "/schedule",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.setDriverSchedule
-);
+// router.post(
+//   "/schedule",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.setDriverSchedule
+// );
 
 // ================================================================
 // DELIVERY MANAGEMENT
@@ -760,12 +760,12 @@ router.get(
  *       404:
  *         description: Delivery not found or not assigned to driver
  */
-router.get(
-  "/deliveries/:deliveryId/route",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.getOptimizedRoute
-);
+// router.get(
+//   "/deliveries/:deliveryId/route",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.getOptimizedRoute
+// );
 
 // ================================================================
 // EARNINGS AND STATISTICS
@@ -920,12 +920,12 @@ router.get(
  *                       type: integer
  *                       description: Rank among all drivers
  */
-router.get(
-  "/performance",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.getDriverPerformance
-);
+// router.get(
+//   "/performance",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.getDriverPerformance
+// );
 
 /**
  * @swagger
@@ -991,12 +991,12 @@ router.get(
  *                             type: string
  *                             format: date-time
  */
-router.get(
-  "/ratings",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.getDriverRatings
-);
+// router.get(
+//   "/ratings",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.getDriverRatings
+// );
 
 // ================================================================
 // REFERRAL SYSTEM
@@ -1031,12 +1031,12 @@ router.get(
  *                       type: string
  *                       description: Base64 encoded QR code image
  */
-router.get(
-  "/referral/code",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.getDriverReferralCode
-);
+// router.get(
+//   "/referral/code",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.getDriverReferralCode
+// );
 
 /**
  * @swagger
@@ -1072,12 +1072,12 @@ router.get(
  *                       items:
  *                         type: object
  */
-router.get(
-  "/referral/stats",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.getReferralStats
-);
+// router.get(
+//   "/referral/stats",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.getReferralStats
+// );
 
 /**
  * @swagger
@@ -1107,12 +1107,12 @@ router.get(
  *                     shareUrl:
  *                       type: string
  */
-router.post(
-  "/referral/generate",
-  auth,
-  rateLimitMiddleware.userRate,
-  DriverController.generateReferralCode
-);
+// router.post(
+//   "/referral/generate",
+//   auth,
+//   rateLimitMiddleware.userRate,
+//   DriverController.generateReferralCode
+// );
 
 // ================================================================
 // VEHICLE MANAGEMENT
@@ -1186,13 +1186,13 @@ router.get(
  *       200:
  *         description: Vehicle information updated successfully
  */
-router.put(
-  "/vehicle",
-  auth,
-  upload.vehicleDocuments,
-  rateLimitMiddleware.userRate,
-  DriverController.updateVehicleInfo
-);
+// router.put(
+//   "/vehicle",
+//   auth,
+//   upload.vehicleDocuments,
+//   rateLimitMiddleware.userRate,
+//   DriverController.updateVehicleInfo
+// );
 
 
 
@@ -1258,13 +1258,13 @@ router.put(
  *                     radius:
  *                       type: number
  */
-router.get(
-  "/nearby",
-  auth,
-  adminAuth(["admin", "support"]),
-  rateLimitMiddleware.adminRate,
-  DriverController.getNearbyDrivers
-);
+// router.get(
+//   "/nearby",
+//   auth,
+//   adminAuth(["admin", "support"]),
+//   rateLimitMiddleware.adminRate,
+//   DriverController.getNearbyDrivers
+// );
 
 // ================================================================
 // ADMIN ROUTES
@@ -1341,13 +1341,13 @@ router.get(
  *       200:
  *         description: Driver verification status updated
  */
-router.patch(
-  "/admin/:id/verify",
-  auth,
-  adminAuth(["admin", "support"]),
-  rateLimitMiddleware.adminRate,
-  DriverController.verifyDriver
-);
+// router.patch(
+//   "/admin/:id/verify",
+//   auth,
+//   adminAuth(["admin", "support"]),
+//   rateLimitMiddleware.adminRate,
+//   DriverController.verifyDriver
+// );
 
 /**
  * @swagger
@@ -1381,13 +1381,13 @@ router.patch(
  *       200:
  *         description: Driver suspended successfully
  */
-router.patch(
-  "/admin/:id/suspend",
-  auth,
-  adminAuth(["admin"]),
-  rateLimitMiddleware.adminRate,
-  DriverController.suspendDriver
-);
+// router.patch(
+//   "/admin/:id/suspend",
+//   auth,
+//   adminAuth(["admin"]),
+//   rateLimitMiddleware.adminRate,
+//   DriverController.suspendDriver
+// );
 
 /**
  * @swagger
@@ -1427,12 +1427,12 @@ router.patch(
  *                     issues:
  *                       type: array
  */
-router.get(
-  "/admin/:id/details",
-  auth,
-  adminAuth(["admin", "support"]),
-  rateLimitMiddleware.adminRate,
-  DriverController.getDriverAdminDetails
-);
+// router.get(
+//   "/admin/:id/details",
+//   auth,
+//   adminAuth(["admin", "support"]),
+//   rateLimitMiddleware.adminRate,
+//   DriverController.getDriverAdminDetails
+// );
 
 module.exports = router;

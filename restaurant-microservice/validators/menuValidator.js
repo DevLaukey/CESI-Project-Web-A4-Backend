@@ -89,13 +89,8 @@ const menuValidation = Joi.object({
           }),
       })
     )
-    .min(1)
-    .max(20)
     .optional()
-    .messages({
-      "array.min": "Menu must contain at least 1 item",
-      "array.max": "Menu cannot contain more than 20 items",
-    }),
+ 
 });
 
 const updateMenuValidation = Joi.object({
