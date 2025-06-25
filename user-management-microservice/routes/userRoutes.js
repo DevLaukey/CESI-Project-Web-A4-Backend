@@ -70,7 +70,7 @@ router.put("/profile", authMiddleware, UserController.updateProfile);
 
 
 // getUserById
-router.get("/:userId", authMiddleware, UserController.getUserById);
+router.get("/:userId", UserController.getUserById);
 
 /**
  * @swagger

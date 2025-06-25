@@ -61,6 +61,7 @@ app.get('/', (req, res) => {
   });
 });
 
+
 // Mount API routes
 app.use('/api', apiRoutes);
 
@@ -77,7 +78,7 @@ app.use('*', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3003;
+const PORT = process.env.PORT || 3005;
 
 // Graceful shutdown handling
 const gracefulShutdown = (signal) => {
