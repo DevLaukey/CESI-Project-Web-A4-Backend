@@ -28,5 +28,6 @@ router.get("/owner/me", RestaurantController.getMyRestaurant);
 router.patch("/owner/me", RestaurantController.updateRestaurant);
 router.patch("/owner/status", RestaurantController.toggleStatus);
 router.get("/owner/statistics", RestaurantController.getStatistics);
+router.delete("/:uuid", RestaurantController.deleteRestaurant);
 
 module.exports = router;
