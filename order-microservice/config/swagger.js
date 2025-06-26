@@ -5,17 +5,10 @@ const options = {
   definition: {
     openapi: "3.0.0",
     info: {
-      title: "User Management Service API",
+      title: "Order Microservice API",
       version: "1.0.0",
-      description:
-        "Independent microservice for user authentication and profile management",
+      description: "API documentation for the Order Microservice",
     },
-    servers: [
-      {
-        url: `http://localhost:${process.env.PORT || 3001}`,
-        description: "Development server",
-      },
-    ],
     components: {
       securitySchemes: {
         bearerAuth: {
@@ -25,12 +18,17 @@ const options = {
         },
       },
     },
+    security: [
+      {
+        bearerAuth: [],
+      },
+    ],
   },
-  apis: ["./routes/*.js"],
+  apis: ["./routes/*.js"], 
 };
 
 const specs = swaggerJsdoc(options);
 
-module.exports = (app) => {
+module.exports = function (app) {
   app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
 };

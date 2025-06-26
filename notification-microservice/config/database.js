@@ -1,79 +1,44 @@
-const fs = require("fs");
-const path = require("path");
+const mongoose = require("mongoose");
 
-// Read SSL certificate if it exists
-let sslConfig = false;
-const caCertPath = process.env.DB_SSL_CA_PATH;
+const connectDatabase = async () => {
+  try {
+    const mongoUri =
+      process.env.MONGODB_URI ||
+      "mongodb+srv://laukey:clmxVEbLaX8pH453@cluster0.mxfix88.mongodb.net/notification_service?retryWrites=true&w=majority&appName=Cluster0";
 
-if (caCertPath && fs.existsSync(caCertPath)) {
-  sslConfig = {
-    ca: fs.readFileSync(caCertPath),
-  };
-}
+    const options = {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      bufferCommands: false,
+      bufferMaxEntries: 0,
+    };
 
-module.exports = {
-  development: {
-    username: process.env.DB_USERNAME ,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    dialect: "mysql",
-    dialectOptions: {
-      ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
-    },
-  },
-  test: {
-    username: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME_TEST,
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    dialect: "mysql",
-    dialectOptions: {
-      ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
-    },
-    logging: false,
-  },
-  production: {
-    username: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 3306,
-    dialect: "mysql",
-    dialectOptions: {
-      ssl: process.env.DB_SSL_REQUIRE === "true" ? sslConfig : false,
-      connectTimeout: 60000,
-      acquireTimeout: 60000,
-      timeout: 60000,
-    },
-    logging: false,
-    pool: {
-      max: 20,
-      min: 5,
-      acquire: 60000,
-      idle: 10000,
-    },
-    retry: {
-      match: [
-        /ETIMEDOUT/,
-        /EHOSTUNREACH/,
-        /ECONNRESET/,
-        /ECONNREFUSED/,
-        /ETIMEDOUT/,
-        /ESOCKETTIMEDOUT/,
-        /EHOSTUNREACH/,
-        /EPIPE/,
-        /EAI_AGAIN/,
-        /SequelizeConnectionError/,
-        /SequelizeConnectionRefusedError/,
-        /SequelizeHostNotFoundError/,
-        /SequelizeHostNotReachableError/,
-        /SequelizeInvalidConnectionError/,
-        /SequelizeConnectionTimedOutError/,
-      ],
-      max: 3,
-    },
-  },
+    await mongoose.connect(mongoUri, options);
+
+    console.log("✅ MongoDB connected successfully");
+
+    // Handle connection events
+    mongoose.connection.on("error", (err) => {
+      console.error("❌ MongoDB connection error:", err);
+    });
+
+    mongoose.connection.on("disconnected", () => {
+      console.log("📴 MongoDB disconnected");
+    });
+
+    // Handle app termination
+    process.on("SIGINT", async () => {
+      await mongoose.connection.close();
+      console.log("📴 MongoDB connection closed through app termination");
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error("❌ MongoDB connection failed:", error);
+    process.exit(1);
+  }
 };
+
+module.exports = { connectDatabase };
