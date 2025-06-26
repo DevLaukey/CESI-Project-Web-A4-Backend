@@ -609,7 +609,7 @@ class DriverController {
   }
 
   static async toggleAvailability(req, res) {
-    const transaction = sequelize.transaction();
+    const transaction = await sequelize.transaction();
     try {
       const driver = await Driver.findByUserId(req.user.id);
       if (!driver) {
@@ -619,22 +619,23 @@ class DriverController {
           message: "Driver profile not found",
         });
       }
-      // Toggle availability
-      const newStatus = driver.is_available ? 0 : 1;
-      await execute(
-        `UPDATE drivers SET
 
-          is_available = ?, updated_at = NOW()
-          WHERE id = ?`,
-        [newStatus, driver.id],
+      // Toggle availability
+      const newAvailability = !driver.is_available;
+      await execute(
+        `UPDATE drivers SET 
+         is_available = ?, updated_at = NOW() 
+         WHERE id = ?`,
+        [newAvailability, driver.id],
         transaction
       );
+
       await transaction.commit();
+
       res.json({
         success: true,
-        message: `Driver availability updated to ${
-          newStatus ? "available" : "unavailable"
-        }`,
+        message: `Driver is now ${newAvailability ? "available" : "unavailable"}`,
+        data: { isAvailable: newAvailability },
       });
     } catch (error) {
       await transaction.rollback();
