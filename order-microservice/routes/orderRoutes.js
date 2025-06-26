@@ -219,4 +219,67 @@ router.patch("/:id/status", authenticateJWT, orderController.updateOrderStatus);
  */
 router.patch("/:id/payment", authenticateJWT, orderController.updatePayment);
 
+// update all order details
+/**
+ *  
+ * @swagger
+ *  
+ * /orders/{id}:
+ *  patch:
+ *    summary: Update order details
+ *  
+ *  tags: [Orders]
+ *  security:
+ *  - bearerAuth: []
+ * parameters:
+ *  - in: path
+ *   name: id
+ *  schema:
+ *  type: integer
+ * required: true
+ * description:   customer order ID
+ * requestBody:
+ * required: true
+ * content:
+ * application/json:
+ * schema:
+ * type: object
+ * properties:
+ * restaurant_id:
+ * type: string
+ * payment_id:
+ * type: string
+ * description: ID of the payment
+ * delivery_address:
+ * type: string
+ * description: Address for delivery
+ * items:
+ * type: array
+ * items:
+ * type: object
+ * properties:
+ * item_id:
+ * type: integer
+ * description: ID of the menu item
+ * quantity:
+ * type: integer
+ * description: Quantity of the item
+ * price:
+ * type: number
+ * description: Price of the item
+ * responses:
+ * 200:
+ *  description: Order details updated successfully
+ * 400:
+ * description: Invalid request body
+ * 404:
+ * description: Order not found
+ * */
+
+router.patch(
+  "/:id",
+  authenticateJWT,
+  orderController.updateOrderDetails
+);
+
 module.exports = router;
