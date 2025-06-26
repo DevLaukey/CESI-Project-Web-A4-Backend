@@ -105,11 +105,9 @@ app.get("/api", (req, res) => {
   });
 });
 
-// REMOVE THE DUPLICATE 404 HANDLER - you have two!
-// Keep only one:
 
-// 404 handler - MUST come after all routes
-app.use(notFoundHandler);
+
+
 
 // Error handler - MUST be the LAST middleware
 app.use(errorHandler);

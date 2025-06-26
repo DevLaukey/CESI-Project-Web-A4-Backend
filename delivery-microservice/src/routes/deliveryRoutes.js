@@ -156,8 +156,7 @@ const router = express.Router();
  */
 router.post(
   "/",
-  serviceAuth,
-  rateLimitMiddleware.serviceRate,
+
   DeliveryController.createDelivery
 );
 
@@ -908,7 +907,10 @@ router.post(
  *               $ref: '#/components/schemas/Error'
  */
 router.get(
-  "/" /* your middleware here, */ /* deliveryController.getAllDeliveries */
+  "/",
+  auth,
+  rateLimitMiddleware.userRate,
+  DeliveryController.getAllDeliveries
 );
 
 /**
