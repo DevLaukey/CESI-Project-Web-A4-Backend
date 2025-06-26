@@ -284,6 +284,8 @@ class RestaurantController {
       next(error);
     }
   }
+
+
   // Get restaurant by ID
   static async getRestaurant(req, res, next) {
     try {

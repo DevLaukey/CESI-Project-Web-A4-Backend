@@ -18,6 +18,8 @@ class AuthController {
     try {
       // Validate input
       const { error, value } = registerValidation.validate(req.body);
+
+      console.log("Register validation result:", value, error);
       if (error) {
         return res.status(400).json({
           error: "Validation Error",
@@ -25,6 +27,8 @@ class AuthController {
         });
       }
 
+
+      console.log("Registering user:", value);
       const { email, password, userType, firstName, lastName, ...otherData } =
         value;
 

@@ -11,7 +11,7 @@ const registerValidation = Joi.object({
         "Password must contain at least one lowercase letter, one uppercase letter, one number and one special character",
     }),
   userType: Joi.string()
-    .valid("end_user", "restaurant_owner", "delivery_driver", "developer")
+    .valid("end_user", "restaurant_owner", "delivery_driver", "developer", "sales", "tech_support")
     .required(),
   firstName: Joi.string().min(2).max(50).required(),
   lastName: Joi.string().min(2).max(50).required(),

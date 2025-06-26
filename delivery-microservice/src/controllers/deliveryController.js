@@ -19,6 +19,23 @@ class DeliveryController {
   // SERVICE-TO-SERVICE METHODS
   // ================================================================
 
+  // Get all deliveries 
+  static async getAllDeliveries(req, res) {
+    try {
+      const deliveries = await Delivery.findAll();
+      res.json({
+        success: true,
+        data: deliveries,
+      });
+    } catch (error) {
+      logger.error("Get all deliveries error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+  
   // Create delivery request
   static async createDelivery(req, res) {
     try {
@@ -31,93 +48,54 @@ class DeliveryController {
         });
       }
 
-      // Verify order exists
-      const order = await externalServices.getOrder(value.order_id);
-      if (!order) {
+      const orderId = value.order_id;
+      const restaurantId = value.restaurant_id;
+
+      // Check if order exists and belongs to the restaurant
+      const order = await Delivery.findOrderById(orderId);
+      if (!order || order.restaurant_id !== restaurantId) {
         return res.status(404).json({
           success: false,
-          message: "Order not found",
+          message: "Order not found or does not belong to the restaurant",
         });
       }
 
       // Check if delivery already exists for this order
-      const existingDelivery = await Delivery.findByOrder(value.order_id);
+      const existingDelivery = await Delivery.findByOrderId(orderId);
       if (existingDelivery) {
         return res.status(409).json({
           success: false,
           message: "Delivery already exists for this order",
-          data: existingDelivery,
         });
-      }
+      } 
 
-      // Get restaurant details for pickup address
-      const restaurant = await externalServices.getRestaurant(
-        order.restaurant_id
-      );
-      if (!restaurant) {
-        return res.status(404).json({
-          success: false,
-          message: "Restaurant not found",
-        });
-      }
 
-      // Calculate delivery fee and estimated time
-      const deliveryData = {
+      // Create new delivery
+      const newDelivery = await Delivery.create({
         ...value,
-        restaurant_id: order.restaurant_id,
-        customer_id: order.customer_id,
-        pickup_address: restaurant.address,
-        pickup_lat: restaurant.latitude,
-        pickup_lng: restaurant.longitude,
-        delivery_fee: await this.calculateDeliveryFee(
-          restaurant.latitude,
-          restaurant.longitude,
-          value.delivery_lat,
-          value.delivery_lng
-        ),
-        estimated_delivery_time: this.calculateEstimatedDeliveryTime(),
-      };
+        status: "pending",
+        created_at: new Date(),
+      });
+      logger.info(`New delivery created: ${newDelivery.id}`);
 
-      // Create delivery
-      const delivery = await Delivery.create(deliveryData);
-
-      // Try to auto-assign to available driver
-      const assignment = await deliveryAssignment.findAndAssignDriver(delivery);
-      if (assignment.success) {
-        await Delivery.assignDriver(delivery.id, assignment.driver.id);
-
-        // Notify driver
-        await externalServices.sendNotification(assignment.driver.user_id, {
-          type: "delivery_assigned",
-          delivery_id: delivery.id,
-          order_id: delivery.order_id,
-        });
-
-        // Update socket for real-time
-        const socketManager = req.app.get("socketManager");
-        if (socketManager) {
-          socketManager.notifyDriver(
-            assignment.driver.user_id,
-            "delivery_assigned",
-            {
-              delivery: delivery,
-            }
-          );
-        }
-      }
-
-      logger.info(
-        `Delivery created: ${delivery.id} for order: ${delivery.order_id}`
-      );
+      // Notify restaurant and customer
+      // await externalServices.sendNotification(restaurantId, {
+      //   type: "new_delivery",
+      //   delivery_id: newDelivery.id,
+      //   order_id: orderId,
+      // });
+      // await externalServices.sendNotification(value.customer_id, {
+      //   type: "delivery_request",
+      //   delivery_id: newDelivery.id,
+      //   order_id: orderId,
+      // });
+      
+      
 
       res.status(201).json({
         success: true,
-        message: "Delivery created successfully",
-        data: {
-          ...delivery,
-          auto_assigned: assignment.success,
-          assigned_driver: assignment.success ? assignment.driver : null,
-        },
+        message: "Delivery request created successfully",
+        data: newDelivery,
       });
     } catch (error) {
       logger.error("Create delivery error:", error);

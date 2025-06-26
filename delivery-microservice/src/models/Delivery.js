@@ -119,7 +119,7 @@ class Delivery {
     }
   }
 
-  static async findByOrder(orderId) {
+  static async findByOrderId(orderId) {
     try {
       const [results] = await sequelize.query(
         "SELECT * FROM deliveries WHERE order_id = ?",
@@ -460,6 +460,12 @@ class Delivery {
       Date.now().toString().slice(-8) +
       Math.random().toString(36).substring(2, 5).toUpperCase()
     );
+  }
+
+  static findAll() {
+    return sequelize.query("SELECT * FROM deliveries", {
+      type: sequelize.QueryTypes.SELECT,
+    });
   }
 
   static generateQRCode() {
